@@ -1,0 +1,29 @@
+## Build output
+bin/
+obj/
+
+## IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+## Decompiled source (large, not part of mod source)
+sts2_decompiled/
+
+## Scratch / temp
+_scratch/
+
+## Package files
+*.pck
+*.zip
+
+## Nexus packages
+nexus_packages/
+
+## Backup saves
+modded_save_backup/
+
+## Python cache
+__pycache__/
+.claude/

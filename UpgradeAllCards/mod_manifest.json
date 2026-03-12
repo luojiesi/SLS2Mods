@@ -1,0 +1,7 @@
+{
+    "pck_name": "UpgradeAllCards",
+    "name": "Upgrade All Cards",
+    "author": "JiesiLuo",
+    "description": "Automatically upgrades all starting cards and any new cards added to your deck during a run.",
+    "version": "1.0.0"
+}

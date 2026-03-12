@@ -1,0 +1,7 @@
+{
+    "pck_name": "QuickRestart",
+    "name": "Quick Restart",
+    "author": "JiesiLuo",
+    "description": "Press F5 to instantly restart the current battle or event from the beginning.",
+    "version": "1.0.0"
+}
