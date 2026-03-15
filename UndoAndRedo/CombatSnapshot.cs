@@ -115,6 +115,9 @@ public class CombatSnapshot
 
     // Relics
     private readonly List<RelicSnapshot> _relicStates = new();
+    // MemberwiseClone of each relic — used to restore subclass-specific private fields
+    // (e.g. BrilliantScarf._cardsPlayedThisTurn, VelvetChoker._cardsPlayedThisTurn, etc.)
+    private readonly Dictionary<RelicModel, object> _relicClones = new();
 
     // Pets
     private readonly List<uint> _petCombatIds = new();
@@ -237,6 +240,8 @@ public class CombatSnapshot
         AccessTools.Property(typeof(RelicModel), "Status");
     private static readonly FieldInfo? RelicStackCountField =
         AccessTools.Field(typeof(RelicModel), "<StackCount>k__BackingField");
+    private static readonly MethodInfo? InvokeDisplayAmountChangedMethod =
+        AccessTools.Method(typeof(RelicModel), "InvokeDisplayAmountChanged");
 
     // Potions
     private static readonly FieldInfo PlayerPotionSlotsField =
@@ -328,6 +333,7 @@ public class CombatSnapshot
         Log.Write($"PcsEnergyField: {(PcsEnergyField != null ? "OK" : "NULL")}");
         Log.Write($"RelicDynamicVarsField: {(RelicDynamicVarsField != null ? "OK" : "NULL")}");
         Log.Write($"SmType: {(SmType != null ? "OK" : "NULL")}");
+        Log.Write($"InvokeDisplayAmountChangedMethod: {(InvokeDisplayAmountChangedMethod != null ? "OK" : "NULL")}");
         Log.Write("=== End Diagnostics ===");
     }
 
@@ -616,6 +622,20 @@ public class CombatSnapshot
                 relic.IsMelted,
                 status!,
                 dvClone));
+
+            // Clone the relic to capture subclass-specific private fields
+            // (e.g. BrilliantScarf._cardsPlayedThisTurn, VelvetChoker._cardsPlayedThisTurn)
+            try
+            {
+                var clone = MemberwiseCloneMethod.Invoke(relic, null);
+                if (clone != null)
+                {
+                    snapshot._relicClones[relic] = clone;
+                    // Log subclass field values at capture time
+                    LogRelicSubclassFields("CaptureRelics", relic.Id, clone);
+                }
+            }
+            catch { }
         }
     }
 
@@ -790,6 +810,13 @@ public class CombatSnapshot
                             combatRoom.GetCreatureNode(creature)?.StartReviveAnim();
                         }
                     }
+                }
+
+                // If creature was alive and should now be dead, remove its visual
+                if (!wasDead && saved.CurrentHp <= 0)
+                {
+                    Log.Write($"RestoreCreature: id={saved.CombatId} alive->dead, removing visual");
+                    RemoveCreatureVisual(creature);
                 }
 
                 restoredCount++;
@@ -1227,6 +1254,71 @@ public class CombatSnapshot
 
             if (saved.DynamicVarsClone != null)
                 RelicDynamicVarsField?.SetValue(relic, saved.DynamicVarsClone);
+
+            // Restore subclass-specific private fields from the MemberwiseClone
+            // (e.g. _cardsPlayedThisTurn on BrilliantScarf, TurnsSeen on PollinousCore, etc.)
+            if (_relicClones.TryGetValue(relic, out var clone))
+            {
+                Log.Write($"RestoreRelics: {relic.Id} BEFORE restore:");
+                LogRelicSubclassFields("  BEFORE", relic.Id, relic);
+                int copied = CopyRelicSubclassFields(clone, relic);
+                Log.Write($"RestoreRelics: {relic.Id} AFTER restore ({copied} fields):");
+                LogRelicSubclassFields("  AFTER", relic.Id, relic);
+            }
+
+            // Refresh the relic's counter display (e.g. PollinousCore turn counter)
+            try { InvokeDisplayAmountChangedMethod?.Invoke(relic, null); }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// Copies all private instance fields declared on concrete relic subtypes
+    /// (from the actual type up to, but NOT including, RelicModel itself).
+    /// This restores per-turn counters like _cardsPlayedThisTurn without
+    /// needing to enumerate every relic type explicitly.
+    /// </summary>
+    private static int CopyRelicSubclassFields(object clone, RelicModel target)
+    {
+        int count = 0;
+        var type = target.GetType();
+        while (type != null && type != typeof(RelicModel))
+        {
+            foreach (var field in type.GetFields(
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public |
+                BindingFlags.DeclaredOnly))
+            {
+                if (!field.IsLiteral && !field.IsInitOnly)
+                {
+                    var oldVal = field.GetValue(target);
+                    var newVal = field.GetValue(clone);
+                    field.SetValue(target, newVal);
+                    if (!Equals(oldVal, newVal))
+                        Log.Write($"  CopyField: {target.Id}.{field.Name} {oldVal} -> {newVal}");
+                    count++;
+                }
+            }
+            type = type.BaseType;
+        }
+        return count;
+    }
+
+    private static void LogRelicSubclassFields(string context, ModelId relicId, object relicOrClone)
+    {
+        var type = relicOrClone.GetType();
+        while (type != null && type != typeof(RelicModel))
+        {
+            foreach (var field in type.GetFields(
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public |
+                BindingFlags.DeclaredOnly))
+            {
+                if (!field.IsLiteral && !field.IsInitOnly)
+                {
+                    var val = field.GetValue(relicOrClone);
+                    Log.Write($"  {context}: {relicId}.{field.Name} = {val}");
+                }
+            }
+            type = type.BaseType;
         }
     }
 
@@ -1414,24 +1506,7 @@ public class CombatSnapshot
             enemies?.Remove(creature);
             allies?.Remove(creature);
 
-            // Remove visual node
-            try
-            {
-                var combatRoom = NCombatRoom.Instance;
-                if (combatRoom != null)
-                {
-                    var nCreature = combatRoom.GetCreatureNode(creature);
-                    if (nCreature != null)
-                    {
-                        combatRoom.RemoveCreatureNode(nCreature);
-                        nCreature.QueueFree();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Write($"RemoveSummonedCreatures: visual cleanup ERROR: {ex}");
-            }
+            RemoveCreatureVisual(creature);
 
             // Unsubscribe from state tracker
             CombatManager.Instance?.StateTracker?.Unsubscribe(creature);
@@ -1468,5 +1543,55 @@ public class CombatSnapshot
 
         foreach (var (type, (seed, counter)) in _runRngStates)
             rngsDict[type] = new Rng(seed, counter);
+    }
+
+    /// <summary>
+    /// Remove the NCreature visual node for a creature. Searches both active and
+    /// removing creature node lists. Hides the node immediately and queues it for
+    /// deletion.
+    /// </summary>
+    private static void RemoveCreatureVisual(Creature creature)
+    {
+        try
+        {
+            var combatRoom = NCombatRoom.Instance;
+            if (combatRoom == null) return;
+
+            var nCreature = combatRoom.GetCreatureNode(creature);
+
+            // Fallback: search _removingCreatureNodes if not in active list
+            if (nCreature == null)
+            {
+                foreach (var nc in combatRoom.RemovingCreatureNodes)
+                {
+                    if (GodotObject.IsInstanceValid(nc) && nc.Entity == creature)
+                    {
+                        nCreature = nc;
+                        break;
+                    }
+                }
+            }
+
+            if (nCreature == null)
+            {
+                Log.Write($"RemoveCreatureVisual: no visual node found for {creature.CombatId}");
+                return;
+            }
+
+            Log.Write($"RemoveCreatureVisual: removing visual for {creature.CombatId}");
+
+            // Hide immediately so it disappears this frame
+            nCreature.Visible = false;
+
+            // Remove from tracking (may throw — catch separately from QueueFree)
+            try { combatRoom.RemoveCreatureNode(nCreature); }
+            catch (Exception ex) { Log.Write($"RemoveCreatureVisual: RemoveCreatureNode error: {ex.Message}"); }
+
+            nCreature.QueueFree();
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"RemoveCreatureVisual: ERROR: {ex}");
+        }
     }
 }

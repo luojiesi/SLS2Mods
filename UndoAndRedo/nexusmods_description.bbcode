@@ -1,0 +1,25 @@
+[size=4][b]UndoAndRedo[/b][/size]
+Combat undo/redo for Slay the Spire 2.
+
+Press [b]Left Arrow[/b] to undo, [b]Right Arrow[/b] to redo.
+
+[size=3][b]Features[/b][/size]
+[list]
+[*]Undo/redo card plays, end turn, potion use, and potion discard
+[*]Full combat state snapshot — HP, block, powers, energy, cards, RNG, monster moves, relics, potions, orbs, and more
+[*]Visual refresh — hand cards, power icons, potion slots, pile counts, monster intents, and card descriptions all update correctly
+[*]Only active during your turn when the action queue is idle — no risk of corrupted state
+[/list]
+
+[size=3][b]Credits[/b][/size]
+Inspired by [url=https://github.com/filippobaroni/undo-the-spire]Undo the Spire[/url] for Slay the Spire 1, created by [b]filippobaroni[/b] ([url=https://steamcommunity.com/sharedfiles/filedetails/?id=3354673683]Steam Workshop[/url]). This STS2 version is a ground-up rewrite for the Godot/.NET architecture but follows the same core concept of full combat state snapshots.
+
+[size=3][b]How It Works[/b][/size]
+Before each player action (play card, end turn, use/discard potion), the entire combat state is snapshotted. On undo, the previous snapshot is restored directly — no replay. Visual nodes are refreshed to match the restored state.
+
+[size=3][b]Limitations[/b][/size]
+[list]
+[*]Single-player only
+[*]Cannot undo during enemy turn or mid-animation
+[*]Undo is per-action, not per-card-selection
+[/list]

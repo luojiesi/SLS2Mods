@@ -509,6 +509,23 @@ public static class UndoAndRedoMod
             }
             catch (Exception ex) { Log.Write($"RefreshCardDescriptionsDeferred ERROR: {ex}"); }
         }).CallDeferred();
+
+        // Second pass after one full frame — catches cost modifiers (like VoidForm)
+        // that depend on power state which may not be fully synced during CallDeferred.
+        _ = RefreshCardVisualsNextFrame(hand);
+    }
+
+    private static async Task RefreshCardVisualsNextFrame(NPlayerHand hand)
+    {
+        try
+        {
+            await hand.ToSignal(hand.GetTree(), SceneTree.SignalName.ProcessFrame);
+            foreach (var holder in hand.ActiveHolders)
+            {
+                holder.CardNode?.UpdateVisuals(PileType.Hand, CardPreviewMode.Normal);
+            }
+        }
+        catch (Exception ex) { Log.Write($"RefreshCardVisualsNextFrame ERROR: {ex}"); }
     }
 
     private static void RefreshHandVisuals(CombatState cs)

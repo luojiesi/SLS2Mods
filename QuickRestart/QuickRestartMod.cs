@@ -67,8 +67,7 @@ public static class QuickRestartMod
             // Capture map drawings before teardown (preserves routes drawn since last auto-save)
             var savedDrawings = NRun.Instance?.GlobalUi?.MapScreen?.Drawings?.GetSerializableMapDrawings();
 
-            // Capture enemy positions before teardown (sprite bounds can vary between loads,
-            // causing auto-layout to produce slightly different positions)
+            // Capture enemy positions before teardown
             var savedEnemyPositions = new List<Vector2>();
             try
             {
@@ -114,29 +113,43 @@ public static class QuickRestartMod
             }
             catch { }
 
-            await runManager.LoadIntoLatestMapCoord(deserializedRoom);
-
-            // Restore enemy positions to match the original layout
-            if (savedEnemyPositions.Count > 0)
+            // Fix TotalFloor for encounter RNG: the game saves BEFORE AppendToMapPointHistory,
+            // but StartCombat runs AFTER it. When we pass preFinishedRoom to LoadIntoLatestMapCoord,
+            // it skips AppendToMapPointHistory, making TotalFloor 1 less than the original flow.
+            // This changes the encounter RNG seed, causing different monster generation.
+            if (deserializedRoom != null && runState.VisitedMapCoords.Count > 0)
             {
                 try
                 {
-                    var combatRoom = NCombatRoom.Instance;
-                    if (combatRoom != null)
-                    {
-                        int idx = 0;
-                        foreach (var node in combatRoom.CreatureNodes)
-                        {
-                            if (node.Entity.Side == CombatSide.Enemy && idx < savedEnemyPositions.Count)
-                            {
-                                node.Position = savedEnemyPositions[idx];
-                                idx++;
-                            }
-                        }
-                    }
+                    var lastCoord = runState.VisitedMapCoords[runState.VisitedMapCoords.Count - 1];
+                    var mapPoint = runState.Map.GetPoint(lastCoord);
+                    if (mapPoint != null)
+                        runState.AppendToMapPointHistory(mapPoint.PointType, deserializedRoom.RoomType, deserializedRoom.ModelId);
                 }
                 catch { }
             }
+
+            await runManager.LoadIntoLatestMapCoord(deserializedRoom);
+
+            // Restore enemy positions (RandomizeEnemyScalesAndHues may shift them slightly)
+            try
+            {
+                var combatRoom = NCombatRoom.Instance;
+                if (combatRoom != null)
+                {
+                    int idx = 0;
+                    foreach (var node in combatRoom.CreatureNodes)
+                    {
+                        if (node.Entity.Side == CombatSide.Enemy)
+                        {
+                            if (idx < savedEnemyPositions.Count)
+                                node.Position = savedEnemyPositions[idx];
+                            idx++;
+                        }
+                    }
+                }
+            }
+            catch { }
 
             // Restore map route drawings (GenerateMap calls SetMap which clears them)
             if (savedDrawings != null)

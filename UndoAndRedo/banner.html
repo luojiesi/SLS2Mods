@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>UndoAndRedo Banner</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; background: #111;
+  }
+  .banner {
+    width: 1280px; height: 640px;
+    background: linear-gradient(135deg, #0a0a14 0%, #1a1028 30%, #0d1a2a 70%, #0a0a14 100%);
+    position: relative; overflow: hidden;
+    font-family: 'Segoe UI', 'Arial', sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Subtle grid pattern */
+  .banner::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(100,140,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(100,140,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Vignette */
+  .banner::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.6) 100%);
+  }
+
+  /* Decorative cards fanned out behind */
+  .card {
+    position: absolute;
+    width: 120px; height: 170px;
+    border-radius: 10px;
+    border: 2px solid rgba(180,160,120,0.4);
+    background: linear-gradient(160deg, #2a2235 0%, #1a1525 100%);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    z-index: 1;
+  }
+  .card::after {
+    content: '';
+    position: absolute; inset: 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(180,160,120,0.15);
+  }
+  .card-inner {
+    position: absolute; top: 30px; left: 10px; right: 10px; bottom: 10px;
+    border-radius: 4px;
+    background: linear-gradient(180deg, rgba(40,30,50,0.8), rgba(20,15,30,0.9));
+    border: 1px solid rgba(100,80,140,0.2);
+  }
+  .card-energy {
+    position: absolute; top: -8px; left: -8px;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: radial-gradient(circle, #e8c84a 0%, #b8942a 60%, #8a6a18 100%);
+    border: 2px solid #d4a830;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: bold; font-size: 18px; color: #1a1008;
+    box-shadow: 0 0 12px rgba(232,200,74,0.4);
+  }
+
+  /* Left cards (before undo) */
+  .card.left-1 { left: 60px; top: 160px; transform: rotate(-25deg); opacity: 0.5; }
+  .card.left-2 { left: 130px; top: 130px; transform: rotate(-15deg); opacity: 0.6; }
+  .card.left-3 { left: 210px; top: 120px; transform: rotate(-5deg); opacity: 0.7; }
+
+  /* Right cards (after redo) */
+  .card.right-1 { right: 60px; top: 160px; transform: rotate(25deg); opacity: 0.5; }
+  .card.right-2 { right: 130px; top: 130px; transform: rotate(15deg); opacity: 0.6; }
+  .card.right-3 { right: 210px; top: 120px; transform: rotate(5deg); opacity: 0.7; }
+
+  /* Central content */
+  .content {
+    position: relative; z-index: 10;
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
+
+  /* Arrow icons */
+  .arrows {
+    display: flex; align-items: center; gap: 40px;
+    margin-bottom: 8px;
+  }
+  .arrow {
+    width: 64px; height: 64px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .arrow svg {
+    width: 56px; height: 56px;
+    filter: drop-shadow(0 0 12px rgba(100,180,255,0.4));
+  }
+
+  /* Title */
+  .title {
+    font-size: 72px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    background: linear-gradient(180deg, #f0e8d0 0%, #c8b888 50%, #a89868 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: none;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)) drop-shadow(0 0 30px rgba(200,180,120,0.15));
+  }
+
+  /* Subtitle */
+  .subtitle {
+    font-size: 22px;
+    color: #8899bb;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    font-weight: 300;
+  }
+
+  /* Key hints */
+  .keys {
+    display: flex; gap: 24px; margin-top: 12px;
+  }
+  .key {
+    display: flex; align-items: center; gap: 8px;
+    color: #667799;
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+  .key-cap {
+    padding: 4px 14px;
+    border: 1px solid rgba(100,140,200,0.3);
+    border-radius: 6px;
+    background: rgba(100,140,200,0.08);
+    color: #99aabb;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* Decorative glow orbs */
+  .glow {
+    position: absolute; border-radius: 50%;
+    filter: blur(60px);
+    z-index: 0;
+  }
+  .glow-1 { width: 300px; height: 300px; background: rgba(80,50,160,0.15); left: 100px; top: 100px; }
+  .glow-2 { width: 250px; height: 250px; background: rgba(50,100,200,0.1); right: 120px; top: 150px; }
+  .glow-3 { width: 200px; height: 200px; background: rgba(200,160,60,0.06); left: 50%; top: 50%; transform: translate(-50%,-50%); }
+
+  /* STS2 badge */
+  .badge {
+    position: absolute; bottom: 24px; right: 32px;
+    font-size: 14px; color: #556677; letter-spacing: 2px;
+    z-index: 10; font-weight: 300;
+  }
+</style>
+</head>
+<body>
+<div class="banner">
+  <!-- Glows -->
+  <div class="glow glow-1"></div>
+  <div class="glow glow-2"></div>
+  <div class="glow glow-3"></div>
+
+  <!-- Left cards -->
+  <div class="card left-1"><div class="card-energy">1</div><div class="card-inner"></div></div>
+  <div class="card left-2"><div class="card-energy">2</div><div class="card-inner"></div></div>
+  <div class="card left-3"><div class="card-energy">0</div><div class="card-inner"></div></div>
+
+  <!-- Right cards -->
+  <div class="card right-1"><div class="card-energy">1</div><div class="card-inner"></div></div>
+  <div class="card right-2"><div class="card-energy">3</div><div class="card-inner"></div></div>
+  <div class="card right-3"><div class="card-energy">1</div><div class="card-inner"></div></div>
+
+  <!-- Content -->
+  <div class="content">
+    <div class="arrows">
+      <!-- Undo arrow (curved left) -->
+      <div class="arrow">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M16 18L8 24L16 30" stroke="#7db4e8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 24H32C36.4183 24 40 20.4183 40 16V16C40 11.5817 36.4183 8 32 8H24" stroke="#7db4e8" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <!-- Redo arrow (curved right) -->
+      <div class="arrow">
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M32 18L40 24L32 30" stroke="#7db4e8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M40 24H16C11.5817 24 8 20.4183 8 16V16C8 11.5817 11.5817 8 16 8H24" stroke="#7db4e8" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+    <div class="title">UndoAndRedo</div>
+    <div class="subtitle">Combat Undo &amp; Redo</div>
+    <div class="keys">
+      <div class="key"><span class="key-cap">&larr;</span> Undo</div>
+      <div class="key"><span class="key-cap">&rarr;</span> Redo</div>
+    </div>
+  </div>
+
+  <div class="badge">SLAY THE SPIRE 2</div>
+</div>
+</body>
+</html>
