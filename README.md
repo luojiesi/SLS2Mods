@@ -80,19 +80,27 @@ Replace the `STS2GameDir` path with your game install location.
 
 ### Deploy
 
-Copy the built DLL to the game's `mods/` folder. The game must be closed.
+Each mod ships **three files** to `<game>/mods/` for compatibility with both stable and beta (0.99+) branches:
+
+| File | Purpose |
+|------|---------|
+| `ModName.dll` | Compiled mod assembly |
+| `ModName.pck` | Godot resource pack (required by stable branch) |
+| `ModName.json` | External manifest (required by 0.99+ beta branch) |
+
+The `.json` manifest declares `has_pck` and `has_dll` so the new mod loader knows what to load. The `.pck` is still needed for the stable branch which discovers mods by scanning for `.pck` files.
 
 ```bash
+# Copy all three files (game must be closed)
 cp UndoAndRedo/bin/Release/net9.0/UndoAndRedo.dll \
   "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/UndoAndRedo.dll"
-```
-
-Some mods also require a `.pck` file (Godot resource pack) if they include non-code assets:
-
-```bash
-python create_pck.py UndoAndRedo/mod_manifest.json \
+cp UndoAndRedo/UndoAndRedo.json \
+  "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/UndoAndRedo.json"
+cp UndoAndRedo/UndoAndRedo.pck \
   "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/UndoAndRedo.pck"
 ```
+
+To create a `.pck` file for code-only mods, use PCK Explorer or `create_pck.py` to bundle `mod_manifest.json` into a minimal resource pack.
 
 ### Project Structure
 
@@ -101,20 +109,28 @@ STS2Mods/
   UndoAndRedo/          Combat undo/redo (Left/Right Arrow)
     UndoAndRedoMod.cs     Entry point, input handling, visual refresh
     CombatSnapshot.cs     State capture & restore
+    UndoAndRedo.json      External manifest (0.99+)
+    mod_manifest.json     Internal manifest (inside .pck)
     DOCUMENTATION.md      Full technical documentation
   QuickRestart/         Quick restart (F5)
     QuickRestartMod.cs    Entry point, restart logic
+    QuickRestart.json     External manifest (0.99+)
+    mod_manifest.json     Internal manifest (inside .pck)
   UnifiedSavePath/      Shared save directory
     UnifiedSavePathMod.cs Harmony patches
+    UnifiedSavePath.json  External manifest (0.99+)
+    mod_manifest.json     Internal manifest (inside .pck)
   UpgradeAllCards/      Auto-upgrade starting deck
     UpgradeAllCardsMod.cs Harmony patches
+    UpgradeAllCards.json  External manifest (0.99+)
+    mod_manifest.json     Internal manifest (inside .pck)
 ```
 
 ## Technology
 
 - **Game:** Slay the Spire 2 (Godot 4.5.1 / C# / .NET 9.0)
 - **Patching:** HarmonyX 2.4.2 (runtime method patching via `[ModInitializer]`)
-- **Deployment:** `.dll` placed in `<game>/mods/`; some mods also need a `.pck` resource pack
+- **Mod format:** Dual-compatible with stable (`.pck`-based discovery) and 0.99+ beta (`.json`-based discovery)
 
 ## Credits
 

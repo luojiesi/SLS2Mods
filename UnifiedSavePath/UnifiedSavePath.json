@@ -1,0 +1,11 @@
+{
+    "id": "UnifiedSavePath",
+    "name": "Unified Save Path",
+    "author": "JiesiLuo",
+    "description": "Unifies the save path for modded and vanilla play so all progression is shared.",
+    "version": "1.0.0",
+    "has_pck": true,
+    "has_dll": true,
+    "dependencies": [],
+    "affects_gameplay": false
+}

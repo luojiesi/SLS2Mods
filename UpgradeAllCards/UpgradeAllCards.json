@@ -1,0 +1,11 @@
+{
+    "id": "UpgradeAllCards",
+    "name": "Upgrade All Cards",
+    "author": "JiesiLuo",
+    "description": "Automatically upgrades all starting cards and any new cards added to your deck during a run.",
+    "version": "1.0.0",
+    "has_pck": true,
+    "has_dll": true,
+    "dependencies": [],
+    "affects_gameplay": true
+}

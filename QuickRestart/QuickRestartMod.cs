@@ -16,6 +16,32 @@ using MegaCrit.Sts2.Core.Saves;
 
 namespace QuickRestart;
 
+internal static class Log
+{
+    private static readonly string LogPath = System.IO.Path.Combine(
+        OS.GetUserDataDir(), "logs", "QuickRestart.log");
+
+    private static bool _cleared;
+
+    public static void Write(string message)
+    {
+        try
+        {
+            if (!_cleared)
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(LogPath)!);
+                System.IO.File.WriteAllText(LogPath,
+                    $"[{System.DateTime.Now:HH:mm:ss.fff}] === Log cleared (new session) ==={System.Environment.NewLine}");
+                _cleared = true;
+            }
+            var line = $"[{System.DateTime.Now:HH:mm:ss.fff}] {message}{System.Environment.NewLine}";
+            System.IO.File.AppendAllText(LogPath, line);
+            GD.Print($"[QuickRestart] {message}");
+        }
+        catch { }
+    }
+}
+
 [ModInitializer("Initialize")]
 public static class QuickRestartMod
 {
@@ -37,6 +63,7 @@ public static class QuickRestartMod
             return;
 
         _isRestarting = true;
+        Log.Write("=== QuickRestart triggered ===");
         try
         {
             // Load the save (written when the current room was entered)
@@ -45,6 +72,7 @@ public static class QuickRestartMod
                 return;
 
             var save = saveResult.SaveData;
+            Log.Write($"Save loaded: EventsSeen=[{string.Join(", ", save.EventsSeen)}] PreFinishedRoom={save.PreFinishedRoom?.RoomType}");
 
             // Capture current room before teardown.
             // The game saves BEFORE the room is created, so for event rooms
@@ -59,7 +87,10 @@ public static class QuickRestartMod
                     var runState0 = runManager.DebugOnlyGetState();
                     var currentRoom = runState0?.CurrentRoom;
                     if (currentRoom != null)
+                    {
                         preFinishedRoom = currentRoom.ToSerializable();
+                        Log.Write($"Captured current room: type={currentRoom.RoomType} modelId={currentRoom.ModelId}");
+                    }
                 }
                 catch { }
             }
@@ -128,6 +159,20 @@ public static class QuickRestartMod
                 }
                 catch { }
             }
+
+            // Fix duplicate events: the save is written BEFORE PullNextEvent runs,
+            // so the restored _visitedEventIds doesn't include the current event.
+            // EnterRoomInternal will call MarkRoomVisited (advancing eventsVisited counter),
+            // but won't add the event to _visitedEventIds. Without this fix, the same event
+            // can be selected again when another Unknown room rolls Event.
+            if (deserializedRoom is EventRoom eventRoom)
+            {
+                Log.Write($"Adding event to visited: {eventRoom.CanonicalEvent.Id}");
+                try { runState.AddVisitedEvent(eventRoom.CanonicalEvent); }
+                catch (Exception ex) { Log.Write($"AddVisitedEvent error: {ex.Message}"); }
+            }
+
+            Log.Write($"Before LoadIntoLatestMapCoord: room={deserializedRoom?.RoomType} visitedEvents=[{string.Join(", ", runState.VisitedEventIds)}]");
 
             await runManager.LoadIntoLatestMapCoord(deserializedRoom);
 
