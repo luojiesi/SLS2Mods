@@ -18,8 +18,7 @@ namespace UndoAndRedo;
 internal static class Log
 {
     private static readonly string LogPath = System.IO.Path.Combine(
-        System.Environment.GetFolderPath(System.Environment.SpecialFolder.Desktop),
-        "UndoAndRedo.log");
+        OS.GetUserDataDir(), "logs", "UndoAndRedo.log");
 
     private static bool _cleared;
 
@@ -29,6 +28,7 @@ internal static class Log
         {
             if (!_cleared)
             {
+                System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(LogPath)!);
                 System.IO.File.WriteAllText(LogPath,
                     $"[{System.DateTime.Now:HH:mm:ss.fff}] === Log cleared (new session) ==={System.Environment.NewLine}");
                 _cleared = true;
@@ -188,6 +188,11 @@ public class CombatSnapshot
     // Used to shallow-clone _internalData objects (e.g. HardenedShellPower.Data)
     private static readonly MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    // CardEnergyCost._card — back-reference from energy cost to its owning card.
+    // Must be fixed after restoring card state from a MutableClone, because the clone's
+    // _energyCost._card points to the clone rather than the original card.
+    private static readonly FieldInfo? EnergyCostCardField =
+        AccessTools.Field(typeof(CardEnergyCost), "_card");
     // SurroundedPower._facing — controls character facing direction when enemies are on both sides
     private static readonly Type? SurroundedPowerType =
         AccessTools.TypeByName("MegaCrit.Sts2.Core.Models.Powers.SurroundedPower");
@@ -417,13 +422,15 @@ public class CombatSnapshot
                     && SurroundedPowerType.IsInstanceOfType(power))
                     facingDir = SurroundedFacingField.GetValue(power);
 
+                var powerAmount = (int)PowerAmountField.GetValue(power)!;
                 powers.Add(new PowerData(
                     power.Id,
-                    (int)PowerAmountField.GetValue(power)!,
+                    powerAmount,
                     (int)PowerAmountOnTurnStartField.GetValue(power)!,
                     (bool)PowerSkipField.GetValue(power)!,
                     internalDataClone,
                     facingDir));
+
             }
 
             // Save visual position and body scale for restoring after revive / facing
@@ -947,9 +954,13 @@ public class CombatSnapshot
                 PowerAmountField.SetValue(power, saved.Amount);
                 PowerAmountOnTurnStartField.SetValue(power, saved.AmountOnTurnStart);
                 PowerSkipField.SetValue(power, saved.SkipNextDurationTick);
-                // Restore internal data (e.g. HardenedShellPower.damageReceivedThisTurn)
+                // Restore internal data (e.g. VoidFormPower.cardsPlayedThisTurn)
+                // Re-clone so the snapshot retains its original copy (game mutates the live object)
                 if (saved.InternalData != null && PowerInternalDataField != null)
-                    PowerInternalDataField.SetValue(power, saved.InternalData);
+                {
+                    var cloned = MemberwiseCloneMethod.Invoke(saved.InternalData, null);
+                    PowerInternalDataField.SetValue(power, cloned);
+                }
                 // Restore SurroundedPower._facing
                 if (saved.FacingDirection != null && SurroundedFacingField != null)
                     SurroundedFacingField.SetValue(power, saved.FacingDirection);
@@ -970,8 +981,12 @@ public class CombatSnapshot
             PowerAmountOnTurnStartField.SetValue(newPower, saved.AmountOnTurnStart);
             PowerSkipField.SetValue(newPower, saved.SkipNextDurationTick);
             // Restore internal data for re-created powers too
+            // Re-clone so the snapshot retains its original copy
             if (saved.InternalData != null && PowerInternalDataField != null)
-                PowerInternalDataField.SetValue(newPower, saved.InternalData);
+            {
+                var cloned = MemberwiseCloneMethod.Invoke(saved.InternalData, null);
+                PowerInternalDataField.SetValue(newPower, cloned);
+            }
             // Restore SurroundedPower._facing for re-created powers
             if (saved.FacingDirection != null && SurroundedFacingField != null)
                 SurroundedFacingField.SetValue(newPower, saved.FacingDirection);
@@ -1068,6 +1083,13 @@ public class CombatSnapshot
             // pointing to the clone. Re-initialize to point to the live card so
             // CalculatedVar multipliers (e.g. exhaust pile count) read the correct state.
             card.DynamicVars.InitializeWithOwner(card);
+
+            // Fix EnergyCost._card — the cloned CardEnergyCost has _card pointing to
+            // the clone. Without this fix, GetWithModifiers checks _card.CombatState
+            // which is null on the clone (not in any pile), so global cost modifiers
+            // like VoidForm never apply.
+            if (EnergyCostCardField != null && card.EnergyCost != null)
+                EnergyCostCardField.SetValue(card.EnergyCost, card);
         }
         Log.Write($"RestoreCardStates: restored {matched} cards, {missed} not found in snapshot");
     }

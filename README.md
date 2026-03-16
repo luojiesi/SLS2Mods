@@ -14,12 +14,14 @@ Full combat undo/redo system. Snapshots the entire combat state before each play
 | **Right Arrow** | Redo |
 
 **Features:**
-- Captures all combat state: creature HP/block/powers, card piles, energy, stars, orbs, potions, relics, monster RNG & move states, combat history, run RNG
+- Captures all combat state: creature HP/block/powers (including internal power data like VoidForm counters), card piles, energy, stars, orbs, pets/summoned creatures, potions, relics, monster RNG & move states, combat history, run RNG
 - Bounded undo stack (50 snapshots max)
 - Failed-snapshot sentinel (gracefully skips corrupt snapshots instead of crashing)
 - Full visual refresh after restore: hand cards, power icons, health bars, orb positions, potion slots, pile counts, card descriptions, monster intents, end-turn button state
+- Summoned creature cleanup: removes pet visuals (e.g., King's Sword) when undoing the card that summoned them
 - Animation snapping: cancels all in-progress tweens and snaps visuals to their final positions instantly
 - Guard conditions prevent undo during enemy turns, mid-animation, or screen transitions
+- Logs to `<Godot user data>/logs/UndoAndRedo.log` for debugging
 
 **Limitations:**
 - Single-player only

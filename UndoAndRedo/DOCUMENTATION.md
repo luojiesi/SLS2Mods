@@ -69,7 +69,8 @@ cp UndoAndRedo/bin/Release/net9.0/UndoAndRedo.dll \
 | Card mutable state | CardModel fields (cost, keywords, flags) | `MutableClone()` per card, then field-by-field copy back | Skip identity fields (`_cloneOf`, `_owner`, `Id`, etc.) |
 | Energy & Stars | `PlayerCombatState._energy/_stars` | Copy ints | None |
 | Orbs | `OrbQueue._orbs` | `MutableClone()` each | None |
-| Pets | `PlayerCombatState._pets` | Save CombatId refs | Lookup existing Creature objects by ID |
+| Power internal data | `PowerModel._internalData` | `MemberwiseClone()` | Must re-clone at restore time (game mutates the live object; shallow copy shares reference with snapshot) |
+| Pets | `PlayerCombatState._pets` | Save CombatId refs | Lookup existing Creature objects by ID; remove visuals for pets that were alive but should now be dead |
 | Round number & side | `CombatState.RoundNumber/CurrentSide` | Copy | Fire TurnStarted event to refresh end turn button |
 | Monster RNG | `MonsterModel._rng` (Rng) | Save (Seed, Counter), reconstruct with `new Rng(s, c)` | None |
 | Monster move state | `MonsterMoveStateMachine._currentState, _performedFirstMove`, StateLog, MoveState._performedAtLeastOnce | Save state IDs + bools | Use `ForceCurrentState()` and `SetMoveImmediate()` |
@@ -170,7 +171,21 @@ Key reflection targets:
 
 **Problem:** Per-turn counters in card descriptions (e.g., "X damage this turn") show stale values after undo. The card model state is correct but the visual text hasn't been re-rendered. NCards added during `RefreshHandVisuals` may not be `IsNodeReady()` yet when `NotifyCombatStateChanged` fires, causing `UpdateVisuals` to silently return.
 
-**Solution:** Use `Callable.From(...).CallDeferred()` to call `UpdateVisuals(PileType.Hand, CardPreviewMode.Normal)` on each NCard in the hand one frame later, after all nodes are ready.
+**Solution:** Two-pass refresh:
+1. `Callable.From(...).CallDeferred()` to call `UpdateVisuals(PileType.Hand, CardPreviewMode.Normal)` on each NCard in the hand at the end of the current frame, after all nodes are ready.
+2. `RefreshCardVisualsNextFrame` — awaits `SceneTree.ProcessFrame` and calls `UpdateVisuals` again on the next frame. This second pass is needed because power-based cost modifiers (e.g., VoidForm making the first N cards free) depend on `CardModel.CombatState`, which requires the card's `Pile` property to resolve. Pile resolution may not be ready until after the deferred call completes.
+
+### Summoned Creature Visuals (`RemoveCreatureVisual`)
+
+**Problem:** When undoing a card that summoned a pet (e.g., King's Sword via `OstyCmd.Summon`), the creature's visual node persists on screen even though the model state is restored. This happens because:
+1. `NCombatRoom.GetCreatureNode()` only searches `_creatureNodes`, not `_removingCreatureNodes` — a creature mid-removal won't be found.
+2. The creature may transition from alive to dead during restore but no visual cleanup is triggered.
+
+**Solution:** `RemoveCreatureVisual(Creature)` helper:
+1. Try `GetCreatureNode(creature)` first (active creature list).
+2. Fallback: iterate `_removingCreatureNodes` matching by `Entity == creature`.
+3. Hide immediately (`Visible = false`), call `RemoveCreatureNode` (moves to removing list), then `QueueFree()`.
+4. During creature restore, detect alive→dead transitions and call `RemoveCreatureVisual` for each.
 
 ### General UI Refresh
 
@@ -217,7 +232,9 @@ For future maintenance when game updates break things, here are the critical gam
 
 ## Logging
 
-Debug logging writes to `Desktop/UndoAndRedo.log` and `GD.Print` (Godot console). The `Log` class is in `CombatSnapshot.cs`. Diagnostic messages on startup check all reflection fields. Each capture/restore logs key details.
+Debug logging writes to `<Godot user data>/logs/UndoAndRedo.log` and `GD.Print` (Godot console). On Windows, the Godot user data directory is typically `%AppData%/Godot/app_userdata/Slay the Spire 2/`. The `logs/` subdirectory is auto-created on first write.
+
+The `Log` class is in `CombatSnapshot.cs`. Diagnostic messages on startup check all reflection fields. Each capture/restore logs key details. The log file is cleared at the start of each session.
 
 To disable logging for release, comment out or remove `Log.Write()` calls.
 
@@ -233,7 +250,7 @@ To disable logging for release, comment out or remove `Log.Write()` calls.
 
 When a game update breaks the mod:
 
-1. **Check reflection fields first.** Run the game with the mod, check `Desktop/UndoAndRedo.log` for the "Reflection Cache Diagnostics" block. Any `NULL` entry means a field/property was renamed or removed.
+1. **Check reflection fields first.** Run the game with the mod, check ``<Godot user data>/logs/UndoAndRedo.log`` for the "Reflection Cache Diagnostics" block. Any `NULL` entry means a field/property was renamed or removed.
 
 2. **Decompile the game.** Use ILSpy or dotnet-ilspycmd on `<game>/data_sts2_windows_x86_64/sts2.dll`:
    ```bash
