@@ -84,6 +84,8 @@ public static class PatchUpgradeStartingDeck
 /// <summary>
 /// After the relic grab bag is populated, remove the three eggs so they
 /// won't show up from chests, shops, or events during the run.
+/// Uses the built-in Remove&lt;T&gt;() method which handles both _deques
+/// and internal state correctly.
 /// </summary>
 [HarmonyPatch(typeof(RelicGrabBag), "Populate", new[] { typeof(Player), typeof(Rng) })]
 public static class PatchRemoveEggsFromPool
@@ -91,13 +93,8 @@ public static class PatchRemoveEggsFromPool
     [HarmonyPostfix]
     public static void Postfix(RelicGrabBag __instance)
     {
-        // Access the private _deques dictionary via Harmony's Traverse
-        var deques = Traverse.Create(__instance)
-            .Field<Dictionary<RelicRarity, List<RelicModel>>>("_deques").Value;
-
-        foreach (var kvp in deques)
-        {
-            kvp.Value.RemoveAll(r => UpgradeAllCardsMod.EggIds.Contains(r.Id));
-        }
+        __instance.Remove<FrozenEgg>();
+        __instance.Remove<MoltenEgg>();
+        __instance.Remove<ToxicEgg>();
     }
 }

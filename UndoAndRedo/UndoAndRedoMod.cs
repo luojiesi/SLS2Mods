@@ -44,7 +44,29 @@ public static class UndoAndRedoMod
         if (UndoStack.Count > MaxUndoStackSize)
             UndoStack.RemoveAt(0);
         RedoStack.Clear();
-        Log.Write($"Snapshot taken. Undo stack: {UndoStack.Count}");
+        // Diagnostic: log game state at capture time to help debug stuck animations
+        try
+        {
+            var inTransition = NGame.Instance?.Transition?.InTransition == true;
+            var aqSet = RunManager.Instance?.ActionQueueSet;
+            var aqEmpty = aqSet?.IsEmpty ?? true;
+            var playQueue = NCardPlayQueue.Instance;
+            var pqCount = 0;
+            if (playQueue != null && PlayQueueField != null)
+            {
+                var queueList = PlayQueueField.GetValue(playQueue) as System.Collections.IList;
+                pqCount = queueList?.Count ?? 0;
+            }
+            var hand = NPlayerHand.Instance;
+            var currentPlay = hand != null && HandCurrentCardPlayField != null
+                ? HandCurrentCardPlayField.GetValue(hand) : null;
+            var mode = hand != null && HandCurrentModeField != null
+                ? HandCurrentModeField.GetValue(hand) : null;
+            var actionsDisabled = CombatManager.Instance != null && PlayerActionsDisabledProp != null
+                ? PlayerActionsDisabledProp.GetValue(CombatManager.Instance) : null;
+            Log.Write($"Snapshot taken. Undo stack: {UndoStack.Count} | inTransition={inTransition} aqEmpty={aqEmpty} playQueue={pqCount} currentCardPlay={currentPlay != null} mode={mode} actionsDisabled={actionsDisabled}");
+        }
+        catch { Log.Write($"Snapshot taken. Undo stack: {UndoStack.Count}"); }
     }
 
     public static void Undo()
@@ -287,7 +309,26 @@ public static class UndoAndRedoMod
         var cs = GetCombatState();
         if (cs == null) { Log.Write("CanUndoRedo: blocked by CombatState null"); return false; }
         if (cs.CurrentSide != CombatSide.Player) { Log.Write($"CanUndoRedo: blocked by side={cs.CurrentSide}"); return false; }
-        if (NGame.Instance?.Transition?.InTransition == true) { Log.Write("CanUndoRedo: blocked by transition"); return false; }
+        if (NGame.Instance?.Transition?.InTransition == true)
+        {
+            var pq = NCardPlayQueue.Instance;
+            var pqCnt = 0;
+            if (pq != null && PlayQueueField != null)
+            {
+                var ql = PlayQueueField.GetValue(pq) as System.Collections.IList;
+                pqCnt = ql?.Count ?? 0;
+            }
+            var h = NPlayerHand.Instance;
+            var cp = h != null && HandCurrentCardPlayField != null
+                ? HandCurrentCardPlayField.GetValue(h) : null;
+            var md = h != null && HandCurrentModeField != null
+                ? HandCurrentModeField.GetValue(h) : null;
+            var aqE = RunManager.Instance?.ActionQueueSet?.IsEmpty ?? true;
+            var ad = CombatManager.Instance != null && PlayerActionsDisabledProp != null
+                ? PlayerActionsDisabledProp.GetValue(CombatManager.Instance) : null;
+            Log.Write($"CanUndoRedo: blocked by transition | aqEmpty={aqE} playQueue={pqCnt} currentCardPlay={cp != null} mode={md} actionsDisabled={ad}");
+            return false;
+        }
 
         var aqSet = RunManager.Instance?.ActionQueueSet;
         if (aqSet == null) { Log.Write("CanUndoRedo: blocked by ActionQueueSet null"); return false; }
@@ -1040,7 +1081,7 @@ public static class PatchUsePotionSnapshot
 
 // Take snapshot before player discards a potion
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.GameActions.DiscardPotionGameAction), MethodType.Constructor,
-    new[] { typeof(Player), typeof(uint) })]
+    new[] { typeof(Player), typeof(uint), typeof(bool) })]
 public static class PatchDiscardPotionSnapshot
 {
     [HarmonyPrefix]
@@ -1051,7 +1092,7 @@ public static class PatchDiscardPotionSnapshot
 }
 
 // Clear stacks when combat ends
-[HarmonyPatch(typeof(CombatManager), "Reset")]
+[HarmonyPatch(typeof(CombatManager), "Reset", new[] { typeof(bool) })]
 public static class PatchCombatReset
 {
     [HarmonyPostfix]

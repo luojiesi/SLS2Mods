@@ -1,3 +1,4 @@
+using System.Linq;
 using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Assets;
@@ -80,7 +81,11 @@ public static class QuickRestartMod
             // re-roll the room type and event selection, potentially producing
             // a different event.
             var preFinishedRoom = save.PreFinishedRoom;
-            if (preFinishedRoom == null)
+            if (preFinishedRoom != null)
+            {
+                Log.Write($"Save has PreFinishedRoom: type={preFinishedRoom.RoomType} modelId={preFinishedRoom.EncounterId}");
+            }
+            else
             {
                 try
                 {
@@ -88,42 +93,70 @@ public static class QuickRestartMod
                     var currentRoom = runState0?.CurrentRoom;
                     if (currentRoom != null)
                     {
+                        Log.Write($"Current room: class={currentRoom.GetType().Name} type={currentRoom.RoomType} modelId={currentRoom.ModelId}");
                         preFinishedRoom = currentRoom.ToSerializable();
-                        Log.Write($"Captured current room: type={currentRoom.RoomType} modelId={currentRoom.ModelId}");
+                        Log.Write($"Serialized room: type={preFinishedRoom?.RoomType} encounterId={preFinishedRoom?.EncounterId}");
+                    }
+                    else
+                    {
+                        Log.Write("No current room found");
                     }
                 }
-                catch { }
+                catch (Exception ex) { Log.Write($"Room capture error: {ex}"); }
             }
 
             // Capture map drawings before teardown (preserves routes drawn since last auto-save)
             var savedDrawings = NRun.Instance?.GlobalUi?.MapScreen?.Drawings?.GetSerializableMapDrawings();
 
-            // Capture enemy positions before teardown
-            var savedEnemyPositions = new List<Vector2>();
+            // Capture enemy positions before teardown.
+            // We need ALL enemy positions (including dead/dying) to restore correctly.
+            // CreatureNodes excludes dead enemies (moved to _removingCreatureNodes),
+            // so we also search there. Without this, killing a monster then restarting
+            // causes position mismatch: fewer saved positions than enemies after restart.
+            var savedEnemyPositions = new List<(uint combatId, Vector2 pos, bool alive)>();
             try
             {
                 var combatRoom = NCombatRoom.Instance;
                 if (combatRoom != null)
                 {
+                    // Alive enemies from active list
                     foreach (var node in combatRoom.CreatureNodes)
                     {
                         if (node.Entity.Side == CombatSide.Enemy)
-                            savedEnemyPositions.Add(node.Position);
+                        {
+                            savedEnemyPositions.Add((node.Entity.CombatId ?? 0, node.Position, true));
+                            Log.Write($"Enemy position (alive): id={node.Entity.CombatId} pos={node.Position}");
+                        }
                     }
+                    // Dead/dying enemies from removing list
+                    foreach (var node in combatRoom.RemovingCreatureNodes)
+                    {
+                        if (GodotObject.IsInstanceValid(node) && node.Entity.Side == CombatSide.Enemy)
+                        {
+                            savedEnemyPositions.Add((node.Entity.CombatId ?? 0, node.Position, false));
+                            Log.Write($"Enemy position (dead/dying): id={node.Entity.CombatId} pos={node.Position}");
+                        }
+                    }
+                    // Sort by CombatId so ordering matches post-restart (all enemies alive, ordered by id)
+                    savedEnemyPositions.Sort((a, b) => a.combatId.CompareTo(b.combatId));
+                    Log.Write($"Captured {savedEnemyPositions.Count} enemy positions ({savedEnemyPositions.Count(p => p.alive)} alive, {savedEnemyPositions.Count(p => !p.alive)} dead), sorted by CombatId");
                 }
             }
-            catch { }
+            catch (Exception ex) { Log.Write($"Enemy position capture error: {ex.Message}"); }
 
             // Tear down current run (mirrors NPauseMenu.CloseToMenu + NGame.ReturnToMainMenu)
+            Log.Write("Tearing down current run...");
             runManager.ActionQueueSet.Reset();
             NRunMusicController.Instance?.StopMusic();
             await NGame.Instance.Transition.FadeOut();
             runManager.CleanUp();
+            Log.Write("CleanUp complete");
 
             // Reconstruct run state from save (mirrors NMainMenu.OnContinueButtonPressedAsync)
             var runState = RunState.FromSerializable(save);
             runManager.SetUpSavedSinglePlayer(runState, save);
             NGame.Instance.ReactionContainer.InitializeNetworking(new NetSingleplayerGameService());
+            Log.Write($"RunState reconstructed: act={runState.Act} floor={runState.TotalFloor} visitedCoords={runState.VisitedMapCoords.Count}");
 
             // Load back into the run (mirrors NGame.LoadRun)
             await PreloadManager.LoadRunAssets(
@@ -132,6 +165,7 @@ public static class QuickRestartMod
             runManager.Launch();
             NGame.Instance.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
             await runManager.GenerateMap();
+            Log.Write("Map generated, loading into room...");
 
             // Deserialize the room.
             // FromSerializable only handles Monster/Elite/Boss/Event.
@@ -140,9 +174,18 @@ public static class QuickRestartMod
             AbstractRoom? deserializedRoom = null;
             try
             {
-                deserializedRoom = AbstractRoom.FromSerializable(preFinishedRoom, runState);
+                if (preFinishedRoom != null)
+                {
+                    Log.Write($"Deserializing room: type={preFinishedRoom.RoomType} modelId={preFinishedRoom.EncounterId}");
+                    deserializedRoom = AbstractRoom.FromSerializable(preFinishedRoom, runState);
+                    Log.Write($"Deserialized room: {deserializedRoom?.GetType().Name} type={deserializedRoom?.RoomType}");
+                }
+                else
+                {
+                    Log.Write("No preFinishedRoom to deserialize (null)");
+                }
             }
-            catch { }
+            catch (Exception ex) { Log.Write($"Room deserialization FAILED: {ex}"); }
 
             // Fix TotalFloor for encounter RNG: the game saves BEFORE AppendToMapPointHistory,
             // but StartCombat runs AFTER it. When we pass preFinishedRoom to LoadIntoLatestMapCoord,
@@ -174,27 +217,37 @@ public static class QuickRestartMod
 
             Log.Write($"Before LoadIntoLatestMapCoord: room={deserializedRoom?.RoomType} visitedEvents=[{string.Join(", ", runState.VisitedEventIds)}]");
 
+            Log.Write($"LoadIntoLatestMapCoord: deserializedRoom={deserializedRoom?.RoomType} modelId={deserializedRoom?.ModelId}");
             await runManager.LoadIntoLatestMapCoord(deserializedRoom);
+            Log.Write("LoadIntoLatestMapCoord complete");
 
-            // Restore enemy positions (RandomizeEnemyScalesAndHues may shift them slightly)
+            // Restore enemy positions (RandomizeEnemyScalesAndHues may shift them slightly).
+            // After restart all enemies are alive, so we use the full saved list (alive + dead).
+            // Only restore if counts match — a mismatch means the encounter changed.
             try
             {
                 var combatRoom = NCombatRoom.Instance;
                 if (combatRoom != null)
                 {
-                    int idx = 0;
-                    foreach (var node in combatRoom.CreatureNodes)
+                    var enemyNodes = combatRoom.CreatureNodes
+                        .Where(n => n.Entity.Side == CombatSide.Enemy).ToList();
+                    Log.Write($"Post-restart enemy count: {enemyNodes.Count}, saved positions: {savedEnemyPositions.Count}");
+                    if (enemyNodes.Count == savedEnemyPositions.Count)
                     {
-                        if (node.Entity.Side == CombatSide.Enemy)
+                        for (int i = 0; i < enemyNodes.Count; i++)
                         {
-                            if (idx < savedEnemyPositions.Count)
-                                node.Position = savedEnemyPositions[idx];
-                            idx++;
+                            var oldPos = enemyNodes[i].Position;
+                            enemyNodes[i].Position = savedEnemyPositions[i].pos;
+                            Log.Write($"Restored enemy id={enemyNodes[i].Entity.CombatId}: {oldPos} -> {savedEnemyPositions[i].pos} (saved id={savedEnemyPositions[i].combatId})");
                         }
+                    }
+                    else
+                    {
+                        Log.Write($"Skipping position restore: count mismatch ({enemyNodes.Count} vs {savedEnemyPositions.Count})");
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Log.Write($"Enemy position restore error: {ex.Message}"); }
 
             // Restore map route drawings (GenerateMap calls SetMap which clears them)
             if (savedDrawings != null)
@@ -202,7 +255,9 @@ public static class QuickRestartMod
                 NRun.Instance?.GlobalUi?.MapScreen?.Drawings?.LoadDrawings(savedDrawings);
             }
 
+            Log.Write("Fading in...");
             await NGame.Instance.Transition.FadeIn();
+            Log.Write("=== QuickRestart complete ===");
 
             // Restore map marker AFTER everything is loaded and faded in.
             // SetMap() hides it, and Open() skips placement for boss/starting rows.
