@@ -533,7 +533,17 @@ public class CombatSnapshot
         }
 
         // Escaped creatures (shallow copy of references)
-        snapshot._escapedCreatures.AddRange(cs.EscapedCreatures);
+        // Use reflection to avoid JIT MissingMethodException if EscapedCreatures return type changed
+        try
+        {
+            if (EscapedCreaturesProp != null)
+            {
+                var escaped = EscapedCreaturesProp.GetValue(cs);
+                if (escaped is IEnumerable<Creature> escapedEnum)
+                    snapshot._escapedCreatures.AddRange(escapedEnum);
+            }
+        }
+        catch { }
 
         // Creature ID allocator
         if (NextCreatureIdField != null)
@@ -1023,12 +1033,24 @@ public class CombatSnapshot
             {
                 // Modify in-place to avoid stale references from code caching the list
                 var currentEscaped = EscapedCreaturesProp.GetValue(cs);
-                if (currentEscaped is List<Creature> escapedList)
+                bool escapedRestored = false;
+                if (currentEscaped is IList<Creature> escapedList)
                 {
                     int oldCount = escapedList.Count;
                     escapedList.Clear();
-                    escapedList.AddRange(_escapedCreatures);
+                    foreach (var c in _escapedCreatures) escapedList.Add(c);
                     Log.Write($"RestoreEscapedCreatures: {oldCount}->{_escapedCreatures.Count}");
+                    escapedRestored = true;
+                }
+                if (!escapedRestored)
+                {
+                    // Type changed to read-only — set via backing field
+                    var bf = AccessTools.Field(typeof(CombatState), "<EscapedCreatures>k__BackingField");
+                    if (bf != null)
+                    {
+                        bf.SetValue(cs, new List<Creature>(_escapedCreatures));
+                        Log.Write($"RestoreEscapedCreatures via backingField: {_escapedCreatures.Count}");
+                    }
                 }
             }
         }
