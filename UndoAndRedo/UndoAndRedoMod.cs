@@ -147,6 +147,7 @@ public static class UndoAndRedoMod
     private static readonly System.Reflection.MethodInfo NotifyCombatStateChangedMethod =
         AccessTools.Method(typeof(CombatStateTracker), "NotifyCombatStateChanged");
 
+
     // Card holder animation snapping (lazy-initialized from instance type)
     private static Type? _holderType;
     private static System.Reflection.FieldInfo? HolderTargetPosField;
@@ -1071,7 +1072,7 @@ public static class PatchPlayCardSnapshot
     [HarmonyPrefix]
     public static void Prefix()
     {
-        UndoAndRedoMod.TakeSnapshot();
+        try { UndoAndRedoMod.TakeSnapshot(); } catch (Exception ex) { Log.Write($"TakeSnapshot exception: {ex.GetType().Name}: {ex.Message}"); }
     }
 }
 
@@ -1126,6 +1127,19 @@ public static class PatchCombatReset
 [HarmonyPatch(typeof(CombatManager), "StartTurn")]
 public static class PatchStartTurn
 {
+    // Cached for both old (CombatState, Player) and new (HookPlayerChoiceContext, Task, CombatState, Player) signatures
+    private static readonly System.Reflection.MethodInfo? BeforePlayPhaseStartNewMethod =
+        typeof(MegaCrit.Sts2.Core.Hooks.Hook).GetMethod("BeforePlayPhaseStart",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+            null,
+            new[] { typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.HookPlayerChoiceContext), typeof(Task), typeof(CombatState), typeof(MegaCrit.Sts2.Core.Entities.Players.Player) },
+            null);
+    private static readonly System.Reflection.MethodInfo? BeforePlayPhaseStartOldMethod =
+        typeof(MegaCrit.Sts2.Core.Hooks.Hook).GetMethod("BeforePlayPhaseStart",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static,
+            null,
+            new[] { typeof(CombatState), typeof(MegaCrit.Sts2.Core.Entities.Players.Player) },
+            null);
     [HarmonyPrefix]
     public static void Prefix(CombatManager __instance)
     {
@@ -1195,15 +1209,30 @@ public static class PatchStartTurn
             }
             catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: OrbQueue ERROR: {ex.Message}"); }
 
-            // 3. Hook.BeforePlayPhaseStart
+            // 3. Hook.BeforePlayPhaseStart (cached static fields handle both old and new API signatures)
             try
             {
+                var localNetId = MegaCrit.Sts2.Core.Context.LocalContext.NetId;
                 foreach (var player in cs.Players)
                 {
                     if (!player.Creature.IsDead)
                     {
                         Log.Write(">>> DelayedPlayPhaseCheck: calling Hook.BeforePlayPhaseStart");
-                        await MegaCrit.Sts2.Core.Hooks.Hook.BeforePlayPhaseStart(cs, player);
+                        if (BeforePlayPhaseStartNewMethod != null && localNetId.HasValue)
+                        {
+                            var ctx2 = new MegaCrit.Sts2.Core.GameActions.Multiplayer.HookPlayerChoiceContext(
+                                player, localNetId.Value,
+                                MegaCrit.Sts2.Core.Entities.Multiplayer.GameActionType.CombatPlayPhaseOnly);
+                            await (Task)BeforePlayPhaseStartNewMethod.Invoke(null, new object[] { ctx2, Task.CompletedTask, cs, player })!;
+                        }
+                        else if (BeforePlayPhaseStartOldMethod != null)
+                        {
+                            await (Task)BeforePlayPhaseStartOldMethod.Invoke(null, new object[] { cs, player })!;
+                        }
+                        else
+                        {
+                            Log.Write(">>> DelayedPlayPhaseCheck: BeforePlayPhaseStart method not found (signature unknown)");
+                        }
                         Log.Write(">>> DelayedPlayPhaseCheck: Hook.BeforePlayPhaseStart done");
                     }
                 }
