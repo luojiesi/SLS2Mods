@@ -14,8 +14,10 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.UI;
 using MegaCrit.Sts2.Core.Nodes.Cards;
 using MegaCrit.Sts2.Core.Entities.Orbs;
+using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Nodes.Orbs;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Nodes.Vfx;
 
 namespace UndoAndRedo;
 
@@ -370,6 +372,9 @@ public static class UndoAndRedoMod
         // Sync hand card visuals with restored pile contents
         RefreshHandVisuals(cs);
 
+        // Sync Regent's Sovereign Blade orbiting VFX with restored pile contents
+        RefreshSovereignBladeVisuals(cs);
+
         // Snap card holders to final positions instantly (skip animation)
         SnapHandPositions();
 
@@ -636,6 +641,72 @@ public static class UndoAndRedoMod
 
         hand.ForceRefreshCardIndices();
         Log.Write($"RefreshHandVisuals: visual={currentVisualCards.Count} restored={restoredHandCards.Count}");
+    }
+
+    private static void RefreshSovereignBladeVisuals(CombatState cs)
+    {
+        foreach (var ally in cs.Allies)
+        {
+            var player = ally.Player;
+            if (player == null) continue;
+
+            var nCreature = NCombatRoom.Instance?.GetCreatureNode(player.Creature);
+            if (nCreature == null) continue;
+
+            var desiredBlades = new List<SovereignBlade>();
+            foreach (var pile in player.PlayerCombatState.AllPiles)
+            {
+                foreach (var card in pile.Cards)
+                {
+                    if (!card.IsDupe && card is SovereignBlade blade)
+                        desiredBlades.Add(blade);
+                }
+            }
+
+            var desiredBladeSet = new HashSet<CardModel>(desiredBlades);
+            var activeBladeCards = new HashSet<CardModel>();
+            var bladeNodes = new List<NSovereignBladeVfx>();
+
+            foreach (var child in nCreature.GetChildren())
+            {
+                if (child is NSovereignBladeVfx bladeNode)
+                    bladeNodes.Add(bladeNode);
+            }
+
+            foreach (var bladeNode in bladeNodes)
+            {
+                var bladeCard = bladeNode.Card;
+                if (!desiredBladeSet.Contains(bladeCard) || !activeBladeCards.Add(bladeCard))
+                {
+                    nCreature.RemoveChild(bladeNode);
+                    bladeNode.QueueFree();
+                }
+            }
+
+            foreach (var blade in desiredBlades)
+            {
+                if (activeBladeCards.Contains(blade))
+                    continue;
+
+                var bladeNode = NSovereignBladeVfx.Create(blade);
+                if (bladeNode == null)
+                    continue;
+
+                nCreature.AddChild(bladeNode);
+                bladeNode.Position = Vector2.Zero;
+                bladeNode.Forge(blade.DynamicVars.Damage.IntValue, false);
+                activeBladeCards.Add(blade);
+            }
+
+            for (int i = 0; i < desiredBlades.Count; i++)
+            {
+                var bladeNode = SovereignBlade.GetVfxNode(player, desiredBlades[i]);
+                if (bladeNode != null)
+                    bladeNode.OrbitProgress = (float)i / desiredBlades.Count;
+            }
+
+            Log.Write($"RefreshSovereignBladeVisuals: desired={desiredBlades.Count} active={activeBladeCards.Count}");
+        }
     }
 
     private static void SnapHandPositions()
@@ -1184,7 +1255,8 @@ public static class PatchStartTurn
                             player, localNetId,
                             MegaCrit.Sts2.Core.Entities.Multiplayer.GameActionType.CombatPlayPhaseOnly);
                         Log.Write(">>> DelayedPlayPhaseCheck: calling CombatManager.RunAutoPrePlayPhase");
-                        await (Task)RunAutoPrePlayPhaseMethod.Invoke(cm, new object?[] { ctx, Task.CompletedTask, player })!;
+                        var task = (Task)RunAutoPrePlayPhaseMethod.Invoke(cm, new object?[] { ctx, Task.CompletedTask, player })!;
+                        await ctx.AssignTaskAndWaitForPauseOrCompletion(task);
                         Log.Write(">>> DelayedPlayPhaseCheck: CombatManager.RunAutoPrePlayPhase done");
                     }
                 }
@@ -1204,12 +1276,8 @@ public static class PatchStartTurn
             if (cm.IsInProgress)
             {
                 Log.Write(">>> DelayedPlayPhaseCheck: forcing PlayPhase init");
-                var deferredField = AccessTools.Field(syncr.GetType(), "_requestedActionsWaitingForPlayerTurn");
-                if (deferredField?.GetValue(syncr) is System.Collections.IList deferred) deferred.Clear();
-                var bf = AccessTools.Field(syncr.GetType(), "<CombatState>k__BackingField");
-                bf?.SetValue(syncr, MegaCrit.Sts2.Core.Entities.Multiplayer.ActionSynchronizerCombatState.PlayPhase);
-                RunManager.Instance?.ActionQueueSet?.UnpauseAllPlayerQueues();
                 RunManager.Instance?.ActionExecutor?.Unpause();
+                syncr.SetCombatState(MegaCrit.Sts2.Core.Entities.Multiplayer.ActionSynchronizerCombatState.PlayPhase);
                 AccessTools.Property(typeof(CombatManager), "IsPlayPhase")?.SetValue(cm, true);
                 AccessTools.Property(typeof(CombatManager), "IsEnemyTurnStarted")?.SetValue(cm, false);
                 var del = AccessTools.Field(typeof(CombatManager), "TurnStarted")?.GetValue(cm) as Delegate;
