@@ -338,6 +338,20 @@ public static class UndoAndRedoMod
 
         var aqSet = RunManager.Instance?.ActionQueueSet;
         if (aqSet == null) { Log.Write("CanUndoRedo: blocked by ActionQueueSet null"); return false; }
+
+        var syncr = RunManager.Instance?.ActionQueueSynchronizer;
+        if (syncr == null) { Log.Write("CanUndoRedo: blocked by ActionQueueSynchronizer null"); return false; }
+        if (syncr.CombatState != MegaCrit.Sts2.Core.Entities.Multiplayer.ActionSynchronizerCombatState.PlayPhase)
+        {
+            Log.Write($"CanUndoRedo: blocked by combatState={syncr.CombatState}");
+            return false;
+        }
+        if (IsPlayPhaseProp != null && !(bool)(IsPlayPhaseProp.GetValue(CombatManager.Instance) ?? false))
+        {
+            Log.Write("CanUndoRedo: blocked by IsPlayPhase=false");
+            return false;
+        }
+
         if (!aqSet.IsEmpty) { Log.Write("CanUndoRedo: blocked by ActionQueueSet not empty"); return false; }
 
         // Visual play queue still draining (card fly-to-discard animations)
@@ -1227,7 +1241,6 @@ public static class PatchStartTurn
     {
         try
         {
-            // Wait ~60 frames (~1 second at 60fps) for normal StartTurn to complete
             for (int i = 0; i < 60; i++)
                 await NGame.Instance.ToSignal(NGame.Instance.GetTree(), SceneTree.SignalName.ProcessFrame);
 

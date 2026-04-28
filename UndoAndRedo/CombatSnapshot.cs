@@ -363,6 +363,7 @@ public class CombatSnapshot
             // Identity/reference fields — must not be overwritten
             "_cloneOf", "_canonicalInstance", "_deckVersion", "_owner",
             "_isDupe", "_currentTarget", "_isEnchantmentPreview",
+            "<Enchantment>k__BackingField", "<Affliction>k__BackingField",
             // AbstractModel identity fields
             "<Id>k__BackingField", "<IsMutable>k__BackingField",
             "<CategorySortingId>k__BackingField", "<EntrySortingId>k__BackingField"
@@ -1256,8 +1257,31 @@ public class CombatSnapshot
             // like VoidForm never apply.
             if (EnergyCostCardField != null && card.EnergyCost != null)
                 EnergyCostCardField.SetValue(card.EnergyCost, card);
+
+            RestoreCardAttachments(card, clone);
         }
         Log.Write($"RestoreCardStates: restored {matched} cards, {missed} not found in snapshot");
+    }
+
+    private static void RestoreCardAttachments(CardModel card, CardModel clone)
+    {
+        if (card.Enchantment != null)
+            card.ClearEnchantmentInternal();
+        if (clone.Enchantment != null)
+        {
+            var restoredEnchantment =
+                (EnchantmentModel)clone.Enchantment.ClonePreservingMutability();
+            card.EnchantInternal(restoredEnchantment, restoredEnchantment.Amount);
+        }
+
+        if (card.Affliction != null)
+            card.ClearAfflictionInternal();
+        if (clone.Affliction != null)
+        {
+            var restoredAffliction =
+                (AfflictionModel)clone.Affliction.ClonePreservingMutability();
+            card.AfflictInternal(restoredAffliction, restoredAffliction.Amount);
+        }
     }
 
     private void RestoreMonsterMoves(MonsterModel monster, uint combatId)
