@@ -163,7 +163,7 @@ public static class QuickRestartMod
 
             // 4. Reconstruct run state from save (mirrors NMainMenu.OnContinueButtonPressedAsync)
             var runState = RunState.FromSerializable(save);
-            runManager.SetUpSavedSinglePlayer(runState, save);
+            await runManager.SetUpSavedSinglePlayer(runState, save);
             NGame.Instance.ReactionContainer.InitializeNetworking(new NetSingleplayerGameService());
             Log.Write($"RunState reconstructed: act={runState.Act} floor={runState.TotalFloor}");
 

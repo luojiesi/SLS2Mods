@@ -533,7 +533,8 @@ public class CombatSnapshot
         }
 
         // Escaped creatures (shallow copy of references)
-        snapshot._escapedCreatures.AddRange(cs.EscapedCreatures);
+        if (EscapedCreaturesProp?.GetValue(cs) is IEnumerable<Creature> escapedCreatures)
+            snapshot._escapedCreatures.AddRange(escapedCreatures);
 
         // Creature ID allocator
         if (NextCreatureIdField != null)
@@ -1023,11 +1024,12 @@ public class CombatSnapshot
             {
                 // Modify in-place to avoid stale references from code caching the list
                 var currentEscaped = EscapedCreaturesProp.GetValue(cs);
-                if (currentEscaped is List<Creature> escapedList)
+                if (currentEscaped is IList<Creature> escapedList)
                 {
                     int oldCount = escapedList.Count;
                     escapedList.Clear();
-                    escapedList.AddRange(_escapedCreatures);
+                    foreach (var creature in _escapedCreatures)
+                        escapedList.Add(creature);
                     Log.Write($"RestoreEscapedCreatures: {oldCount}->{_escapedCreatures.Count}");
                 }
             }

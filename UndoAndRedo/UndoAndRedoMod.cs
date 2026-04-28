@@ -1126,6 +1126,10 @@ public static class PatchCombatReset
 [HarmonyPatch(typeof(CombatManager), "StartTurn")]
 public static class PatchStartTurn
 {
+    private static readonly System.Reflection.MethodInfo RunAutoPrePlayPhaseMethod =
+        AccessTools.Method(typeof(CombatManager), "RunAutoPrePlayPhase",
+            new[] { typeof(HookPlayerChoiceContext), typeof(Task), typeof(Player) })!;
+
     [HarmonyPrefix]
     public static void Prefix(CombatManager __instance)
     {
@@ -1195,20 +1199,24 @@ public static class PatchStartTurn
             }
             catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: OrbQueue ERROR: {ex.Message}"); }
 
-            // 3. Hook.BeforePlayPhaseStart
+            // 3. CombatManager.RunAutoPrePlayPhase
             try
             {
+                var localNetId = MegaCrit.Sts2.Core.Context.LocalContext.NetId!.Value;
                 foreach (var player in cs.Players)
                 {
                     if (!player.Creature.IsDead)
                     {
-                        Log.Write(">>> DelayedPlayPhaseCheck: calling Hook.BeforePlayPhaseStart");
-                        await MegaCrit.Sts2.Core.Hooks.Hook.BeforePlayPhaseStart(cs, player);
-                        Log.Write(">>> DelayedPlayPhaseCheck: Hook.BeforePlayPhaseStart done");
+                        var ctx = new HookPlayerChoiceContext(
+                            player, localNetId,
+                            MegaCrit.Sts2.Core.Entities.Multiplayer.GameActionType.CombatPlayPhaseOnly);
+                        Log.Write(">>> DelayedPlayPhaseCheck: calling CombatManager.RunAutoPrePlayPhase");
+                        await (Task)RunAutoPrePlayPhaseMethod.Invoke(cm, new object?[] { ctx, Task.CompletedTask, player })!;
+                        Log.Write(">>> DelayedPlayPhaseCheck: CombatManager.RunAutoPrePlayPhase done");
                     }
                 }
             }
-            catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: BeforePlayPhaseStart ERROR: {ex.Message}"); }
+            catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: RunAutoPrePlayPhase ERROR: {ex.Message}"); }
 
             // 4. CheckWinCondition
             try
