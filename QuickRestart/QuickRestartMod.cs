@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Audio;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -117,8 +118,16 @@ public static class QuickRestartMod
                     var room = runManager.DebugOnlyGetState()?.CurrentRoom;
                     if (room != null)
                     {
-                        capturedRoom = room.ToSerializable();
-                        Log.Write($"Captured current room: type={capturedRoom?.RoomType} modelId={capturedRoom?.EncounterId}");
+                        var serializedRoom = room.ToSerializable();
+                        if (serializedRoom.RoomType is RoomType.Monster or RoomType.Elite or RoomType.Boss or RoomType.Event)
+                        {
+                            capturedRoom = serializedRoom;
+                            Log.Write($"Captured current room: type={capturedRoom.RoomType} modelId={capturedRoom?.EncounterId}");
+                        }
+                        else
+                        {
+                            Log.Write($"Current room type {serializedRoom.RoomType} uses map-point recreation");
+                        }
                     }
                 }
                 catch (Exception ex) { Log.Write($"Room capture error: {ex.Message}"); }
