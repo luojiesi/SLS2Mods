@@ -64,7 +64,8 @@ public class CombatSnapshot
         int AmountOnTurnStart,
         bool SkipNextDurationTick,
         object? InternalData,
-        object? FacingDirection);
+        object? FacingDirection,
+        object? DynamicVarsClone);
 
     private record struct MonsterMoveSnapshot(
         string? NextMoveStateId,
@@ -189,8 +190,15 @@ public class CombatSnapshot
         AccessTools.Field(typeof(PowerModel), "_amountOnTurnStart");
     private static readonly FieldInfo PowerSkipField =
         AccessTools.Field(typeof(PowerModel), "_skipNextDurationTick");
+    private static readonly FieldInfo? PowerDynamicVarsField =
+        AccessTools.Field(typeof(PowerModel), "_dynamicVars");
     private static readonly FieldInfo? PowerInternalDataField =
         AccessTools.Field(typeof(PowerModel), "_internalData");
+    private static readonly MethodInfo? DynamicVarSetCloneMethod =
+        AccessTools.Method(
+            typeof(MegaCrit.Sts2.Core.Localization.DynamicVars.DynamicVarSet),
+            "Clone",
+            new[] { typeof(AbstractModel) });
     // Used to shallow-clone _internalData objects (e.g. HardenedShellPower.Data)
     private static readonly MethodInfo MemberwiseCloneMethod =
         typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -456,6 +464,11 @@ public class CombatSnapshot
                 if (internalData != null)
                     internalDataClone = MemberwiseCloneMethod.Invoke(internalData, null);
 
+                object? dynamicVarsClone = null;
+                var dynamicVars = PowerDynamicVarsField?.GetValue(power);
+                if (dynamicVars != null && DynamicVarSetCloneMethod != null)
+                    dynamicVarsClone = DynamicVarSetCloneMethod.Invoke(dynamicVars, new object?[] { power });
+
                 // Capture SurroundedPower._facing (character direction when enemies on both sides)
                 object? facingDir = null;
                 if (SurroundedFacingField != null && SurroundedPowerType != null
@@ -469,7 +482,8 @@ public class CombatSnapshot
                     (int)PowerAmountOnTurnStartField.GetValue(power)!,
                     (bool)PowerSkipField.GetValue(power)!,
                     internalDataClone,
-                    facingDir));
+                    facingDir,
+                    dynamicVarsClone));
 
             }
 
@@ -1099,6 +1113,13 @@ public class CombatSnapshot
                     var cloned = MemberwiseCloneMethod.Invoke(saved.InternalData, null);
                     PowerInternalDataField.SetValue(power, cloned);
                 }
+                if (PowerDynamicVarsField != null)
+                {
+                    object? clonedDynamicVars = null;
+                    if (saved.DynamicVarsClone != null && DynamicVarSetCloneMethod != null)
+                        clonedDynamicVars = DynamicVarSetCloneMethod.Invoke(saved.DynamicVarsClone, new object?[] { power });
+                    PowerDynamicVarsField.SetValue(power, clonedDynamicVars);
+                }
                 // Restore SurroundedPower._facing
                 if (saved.FacingDirection != null && SurroundedFacingField != null)
                     SurroundedFacingField.SetValue(power, saved.FacingDirection);
@@ -1124,6 +1145,13 @@ public class CombatSnapshot
             {
                 var cloned = MemberwiseCloneMethod.Invoke(saved.InternalData, null);
                 PowerInternalDataField.SetValue(newPower, cloned);
+            }
+            if (PowerDynamicVarsField != null)
+            {
+                object? clonedDynamicVars = null;
+                if (saved.DynamicVarsClone != null && DynamicVarSetCloneMethod != null)
+                    clonedDynamicVars = DynamicVarSetCloneMethod.Invoke(saved.DynamicVarsClone, new object?[] { newPower });
+                PowerDynamicVarsField.SetValue(newPower, clonedDynamicVars);
             }
             // Restore SurroundedPower._facing for re-created powers
             if (saved.FacingDirection != null && SurroundedFacingField != null)

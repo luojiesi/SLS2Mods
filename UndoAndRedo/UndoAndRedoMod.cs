@@ -26,6 +26,7 @@ public static class UndoAndRedoMod
     private static readonly List<CombatSnapshot> UndoStack = new();
     private static readonly List<CombatSnapshot> RedoStack = new();
     internal static bool IsRestoring;
+    internal static bool PendingStartTurnRecoveryCheck;
 
     public static void Initialize()
     {
@@ -93,6 +94,7 @@ public static class UndoAndRedoMod
         {
             previous.Restore();
             RefreshAllVisuals();
+            PendingStartTurnRecoveryCheck = true;
             Log.Write($">>> UNDO complete. Undo stack: {UndoStack.Count}, Redo stack: {RedoStack.Count}");
         }
         catch (Exception ex) { Log.Write($">>> UNDO ERROR: {ex}"); }
@@ -126,6 +128,7 @@ public static class UndoAndRedoMod
         {
             next.Restore();
             RefreshAllVisuals();
+            PendingStartTurnRecoveryCheck = true;
             Log.Write($">>> REDO complete. Undo stack: {UndoStack.Count}, Redo stack: {RedoStack.Count}");
         }
         catch (Exception ex) { Log.Write($">>> REDO ERROR: {ex}"); }
@@ -139,6 +142,7 @@ public static class UndoAndRedoMod
     {
         UndoStack.Clear();
         RedoStack.Clear();
+        PendingStartTurnRecoveryCheck = false;
     }
 
     private static readonly System.Reflection.FieldInfo CombatManagerStateField =
@@ -1138,10 +1142,10 @@ public static class PatchStartTurn
             var cs = AccessTools.Field(typeof(CombatManager), "_state")?.GetValue(__instance) as CombatState;
             Log.Write($">>> StartTurn called: side={cs?.CurrentSide} round={cs?.RoundNumber} IsInProgress={__instance.IsInProgress}");
 
-            // For player turns: schedule a delayed check that fires PlayPhase init
-            // if StartTurn's async flow hangs (which happens after undo breaks a hook/power).
-            if (cs?.CurrentSide == CombatSide.Player)
+            // Only run the delayed recovery path after an undo/redo restore.
+            if (UndoAndRedoMod.PendingStartTurnRecoveryCheck && cs?.CurrentSide == CombatSide.Player)
             {
+                UndoAndRedoMod.PendingStartTurnRecoveryCheck = false;
                 _ = DelayedPlayPhaseCheck(cs);
             }
         }
@@ -1160,46 +1164,15 @@ public static class PatchStartTurn
             if (syncr == null || cs.CurrentSide != CombatSide.Player) return;
             if (syncr.CombatState != MegaCrit.Sts2.Core.Entities.Multiplayer.ActionSynchronizerCombatState.NotPlayPhase) return;
 
-            // StartTurn's async flow hung — the hooks and PlayPhase init never ran.
-            // Run the skipped steps: AfterSideTurnStart, OrbQueue.AfterTurnStart,
-            // BeforePlayPhaseStart, CheckWinCondition, then PlayPhase init.
-            Log.Write(">>> DelayedPlayPhaseCheck: StartTurn hung, running skipped steps");
+            // StartTurn's async flow hung after an undo/redo restore.
+            // Resume the player phase without replaying turn-start hooks, which
+            // would double-trigger powers like FurnacePower.
+            Log.Write(">>> DelayedPlayPhaseCheck: StartTurn hung, resuming play phase");
 
             var cm = CombatManager.Instance;
             if (cm == null || !cm.IsInProgress) return;
 
-            // 1. Hook.AfterSideTurnStart (power/relic turn start effects)
-            try
-            {
-                Log.Write(">>> DelayedPlayPhaseCheck: calling Hook.AfterSideTurnStart(Player)");
-                await MegaCrit.Sts2.Core.Hooks.Hook.AfterSideTurnStart(cs, CombatSide.Player);
-                Log.Write(">>> DelayedPlayPhaseCheck: Hook.AfterSideTurnStart done");
-            }
-            catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: AfterSideTurnStart ERROR: {ex.Message}"); }
-
-            // 2. OrbQueue.AfterTurnStart
-            try
-            {
-                var localNetId = MegaCrit.Sts2.Core.Context.LocalContext.NetId;
-                if (localNetId.HasValue)
-                {
-                    foreach (var player in cs.Players)
-                    {
-                        if (player?.PlayerCombatState?.OrbQueue != null)
-                        {
-                            Log.Write(">>> DelayedPlayPhaseCheck: calling OrbQueue.AfterTurnStart");
-                            var ctx = new MegaCrit.Sts2.Core.GameActions.Multiplayer.HookPlayerChoiceContext(
-                                player, localNetId.Value,
-                                MegaCrit.Sts2.Core.Entities.Multiplayer.GameActionType.CombatPlayPhaseOnly);
-                            await player.PlayerCombatState.OrbQueue.AfterTurnStart(ctx);
-                            Log.Write(">>> DelayedPlayPhaseCheck: OrbQueue.AfterTurnStart done");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: OrbQueue ERROR: {ex.Message}"); }
-
-            // 3. CombatManager.RunAutoPrePlayPhase
+            // 1. CombatManager.RunAutoPrePlayPhase
             try
             {
                 var localNetId = MegaCrit.Sts2.Core.Context.LocalContext.NetId!.Value;
@@ -1218,7 +1191,7 @@ public static class PatchStartTurn
             }
             catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: RunAutoPrePlayPhase ERROR: {ex.Message}"); }
 
-            // 4. CheckWinCondition
+            // 2. CheckWinCondition
             try
             {
                 Log.Write(">>> DelayedPlayPhaseCheck: calling CheckWinCondition");
@@ -1227,7 +1200,7 @@ public static class PatchStartTurn
             }
             catch (Exception ex) { Log.Write($">>> DelayedPlayPhaseCheck: CheckWinCondition ERROR: {ex.Message}"); }
 
-            // 5. PlayPhase init (same as StartTurn lines 393638-393642)
+            // 3. PlayPhase init (same as StartTurn lines 393638-393642)
             if (cm.IsInProgress)
             {
                 Log.Write(">>> DelayedPlayPhaseCheck: forcing PlayPhase init");
