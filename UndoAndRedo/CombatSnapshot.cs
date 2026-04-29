@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Entities.Orbs;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Rngs;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Random;
@@ -182,6 +183,16 @@ public class CombatSnapshot
         AccessTools.Method(typeof(CombatStateTracker), "Subscribe", new[] { typeof(CardModel) });
     private static readonly MethodInfo? StateTrackerUnsubscribeCardMethod =
         AccessTools.Method(typeof(CombatStateTracker), "Unsubscribe", new[] { typeof(CardModel) });
+    private static readonly FieldInfo? CombatManagerCombatCtsField =
+        AccessTools.Field(typeof(CombatManager), "_combatCts");
+    private static readonly FieldInfo? TransitionTweenField =
+        AccessTools.Field(typeof(NTransition), "_tween");
+    private static readonly FieldInfo? TransitionSimpleField =
+        AccessTools.Field(typeof(NTransition), "_simpleTransition");
+    private static readonly FieldInfo? TransitionGradientField =
+        AccessTools.Field(typeof(NTransition), "_gradientTransition");
+    private static readonly FieldInfo? TransitionInTransitionField =
+        AccessTools.Field(typeof(NTransition), "<InTransition>k__BackingField");
 
     // Powers
     private static readonly FieldInfo PowerAmountField =
@@ -813,6 +824,41 @@ public class CombatSnapshot
         {
             var syncr = RunManager.Instance?.ActionQueueSynchronizer;
             var executor = RunManager.Instance?.ActionExecutor;
+
+            var staleCombatCts = CombatManagerCombatCtsField?.GetValue(cm)
+                as System.Threading.CancellationTokenSource;
+            if (staleCombatCts != null && !staleCombatCts.IsCancellationRequested)
+            {
+                Log.Write("Restore: canceling stale combat CTS");
+                staleCombatCts.Cancel();
+            }
+            var poisonedCombatCts = new System.Threading.CancellationTokenSource();
+            poisonedCombatCts.Cancel();
+            CombatManagerCombatCtsField?.SetValue(cm, poisonedCombatCts);
+
+            var transition = NGame.Instance?.Transition;
+            if (transition != null)
+            {
+                if (TransitionTweenField?.GetValue(transition) is Tween tween && tween.IsValid())
+                    tween.Kill();
+                TransitionInTransitionField?.SetValue(transition, false);
+                transition.MouseFilter = Control.MouseFilterEnum.Ignore;
+                if (TransitionSimpleField?.GetValue(transition) is Control simpleTransition)
+                {
+                    var modulate = simpleTransition.Modulate;
+                    modulate.A = 0f;
+                    simpleTransition.Modulate = modulate;
+                }
+                if (TransitionGradientField?.GetValue(transition) is Control gradientTransition)
+                {
+                    var modulate = gradientTransition.Modulate;
+                    modulate.A = 0f;
+                    gradientTransition.Modulate = modulate;
+                }
+                if (transition.Material is ShaderMaterial transitionMaterial)
+                    transitionMaterial.SetShaderParameter("threshold", 0);
+                Log.Write("Restore: reset transition state");
+            }
 
             // 1. Clear stale deferred actions (would be enqueued by SetCombatState)
             if (syncr != null)

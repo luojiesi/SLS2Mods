@@ -149,6 +149,8 @@ public static class UndoAndRedoMod
 
     private static readonly System.Reflection.FieldInfo CombatManagerStateField =
         AccessTools.Field(typeof(CombatManager), "_state");
+    private static readonly System.Reflection.FieldInfo? CombatManagerCombatCtsField =
+        AccessTools.Field(typeof(CombatManager), "_combatCts");
 
     private static readonly System.Reflection.MethodInfo NotifyCombatStateChangedMethod =
         AccessTools.Method(typeof(CombatStateTracker), "NotifyCombatStateChanged");
@@ -370,6 +372,20 @@ public static class UndoAndRedoMod
         var cm = CombatManager.Instance;
         if (cm == null) return null;
         return CombatManagerStateField?.GetValue(cm) as CombatState;
+    }
+
+    internal static void EnsureFreshCombatCancellationSource()
+    {
+        var cm = CombatManager.Instance;
+        if (cm == null || CombatManagerCombatCtsField == null) return;
+
+        var combatCts = CombatManagerCombatCtsField.GetValue(cm)
+            as System.Threading.CancellationTokenSource;
+        if (combatCts != null && !combatCts.IsCancellationRequested)
+            return;
+
+        CombatManagerCombatCtsField.SetValue(cm, new System.Threading.CancellationTokenSource());
+        Log.Write("EnsureFreshCombatCancellationSource: created fresh combat CTS");
     }
 
     private static void RefreshAllVisuals()
@@ -1173,6 +1189,7 @@ public static class PatchEndTurnSnapshot
     public static void Prefix()
     {
         UndoAndRedoMod.TakeSnapshot();
+        UndoAndRedoMod.EnsureFreshCombatCancellationSource();
     }
 }
 
