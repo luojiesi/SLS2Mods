@@ -3,7 +3,7 @@
     "name": "UndoAndRedo",
     "author": "JiesiLuo",
     "description": "Press Left/Right Arrow to undo/redo combat actions. Inspired by filippobaroni's Undo the Spire mod for STS1.",
-    "version": "1.0.0",
+    "version": "1.0.6",
     "has_pck": true,
     "has_dll": true,
     "dependencies": [],

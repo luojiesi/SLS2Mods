@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Audio;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -81,44 +82,37 @@ public static class QuickRestartMod
             var save = saveResult.SaveData;
             Log.Write($"Save loaded: act={save.CurrentActIndex} preFinished={save.PreFinishedRoom?.RoomType} visitedCoords={save.VisitedMapCoords.Count}");
 
-            // When PreFinishedRoom is set, it means a room-completion save has
-            // overwritten the room-entry save. This happens after:
-            //   - Ancient event selection (Neow / act start): SaveRun(eventRoom)
-            //   - Combat victory: SaveRun(combatRoom)
-            // The game's CopyBackup() preserves the previous save as .backup,
-            // which is the room-entry state (pre-combat HP, pre-selection).
-            // Load the backup so F5 restarts from the beginning of the room.
+            // When PreFinishedRoom is set, the current save represents a completed
+            // room state (combat reward/event done page). QuickRestart should load
+            // that exact point, not the room-entry backup.
             bool usedBackup = false;
-            if (save.PreFinishedRoom != null)
-            {
-                Log.Write($"PreFinishedRoom detected ({save.PreFinishedRoom.RoomType}), loading backup save");
-                var backupSave = LoadBackupSave();
-                if (backupSave != null)
-                {
-                    save = backupSave;
-                    usedBackup = true;
-                    Log.Write($"Backup loaded: preFinished={save.PreFinishedRoom?.RoomType} visitedCoords={save.VisitedMapCoords.Count}");
-                }
-                else
-                {
-                    Log.Write("Backup load failed, using original save");
-                }
-            }
 
             // 2. Capture current room for non-completion restarts.
             //    For ? rooms, the room type (Event/Monster/etc) is determined by RNG.
             //    Passing the serialized room to LoadRun ensures the same room type;
             //    passing null would re-roll it and potentially change Event → Combat.
-            SerializableRoom? capturedRoom = null;
-            if (!usedBackup)
+            SerializableRoom? capturedRoom = save.PreFinishedRoom;
+            if (capturedRoom != null)
+            {
+                Log.Write($"Using saved pre-finished room: type={capturedRoom.RoomType} encounter={capturedRoom.EncounterId} event={capturedRoom.EventId} isPreFinished={capturedRoom.IsPreFinished}");
+            }
+            else if (!usedBackup)
             {
                 try
                 {
                     var room = runManager.DebugOnlyGetState()?.CurrentRoom;
                     if (room != null)
                     {
-                        capturedRoom = room.ToSerializable();
-                        Log.Write($"Captured current room: type={capturedRoom?.RoomType} modelId={capturedRoom?.EncounterId}");
+                        var serializedRoom = room.ToSerializable();
+                        if (serializedRoom.RoomType is RoomType.Monster or RoomType.Elite or RoomType.Boss or RoomType.Event)
+                        {
+                            capturedRoom = serializedRoom;
+                            Log.Write($"Captured current room: type={capturedRoom.RoomType} modelId={capturedRoom?.EncounterId}");
+                        }
+                        else
+                        {
+                            Log.Write($"Current room type {serializedRoom.RoomType} uses map-point recreation");
+                        }
                     }
                 }
                 catch (Exception ex) { Log.Write($"Room capture error: {ex.Message}"); }
@@ -163,7 +157,7 @@ public static class QuickRestartMod
 
             // 4. Reconstruct run state from save (mirrors NMainMenu.OnContinueButtonPressedAsync)
             var runState = RunState.FromSerializable(save);
-            runManager.SetUpSavedSinglePlayer(runState, save);
+            await runManager.SetUpSavedSinglePlayer(runState, save);
             NGame.Instance.ReactionContainer.InitializeNetworking(new NetSingleplayerGameService());
             Log.Write($"RunState reconstructed: act={runState.Act} floor={runState.TotalFloor}");
 
