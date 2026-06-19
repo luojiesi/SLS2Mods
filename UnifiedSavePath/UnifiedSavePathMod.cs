@@ -26,7 +26,8 @@ public static class UnifiedSavePathMod
         var harmony = new Harmony("com.unifiedsavepath.sts2");
         harmony.PatchAll(typeof(UnifiedSavePathMod).Assembly);
 
-        // Also force the backing field to false in case it was already set
+        // Also force the flag to false in case it was already set. GetProfileDir
+        // (patched below) is the only consumer, so this is belt-and-suspenders.
         UserDataPathProvider.IsRunningModded = false;
     }
 
@@ -73,31 +74,10 @@ public static class UnifiedSavePathMod
     }
 }
 
-// Patch the getter in case it's called directly
-[HarmonyPatch(typeof(UserDataPathProvider), "get_IsRunningModded")]
-public static class PatchGetIsRunningModded
-{
-    [HarmonyPrefix]
-    public static bool Prefix(ref bool __result)
-    {
-        __result = false;
-        return false;
-    }
-}
-
-// Patch the setter so it can never be set to true
-[HarmonyPatch(typeof(UserDataPathProvider), "set_IsRunningModded")]
-public static class PatchSetIsRunningModded
-{
-    [HarmonyPrefix]
-    public static bool Prefix(ref bool value)
-    {
-        value = false;
-        return true; // run original setter with value=false
-    }
-}
-
-// Patch GetProfileDir directly as a safety net against JIT inlining
+// Patch GetProfileDir directly. This is the only method in the game that reads
+// UserDataPathProvider.IsRunningModded, so forcing the unmodded path here fully
+// unifies modded and unmodded save locations. (As of the auto-property refactor,
+// IsRunningModded no longer exposes separate get_/set_ methods to patch.)
 [HarmonyPatch(typeof(UserDataPathProvider), "GetProfileDir")]
 public static class PatchGetProfileDir
 {
