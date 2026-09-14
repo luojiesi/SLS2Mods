@@ -193,12 +193,13 @@ internal static class RewindEngine
             var prefix = events.Take(target).ToList();
             var segments = rec.SplitRedoSegments(events, target);
             uint? expected = rec.ChecksumBefore(target);
+            var expectedState = rec.StateBefore(target);
             uint? liveChecksum = rec.CurrentChecksum();
             Log.Write($"Undo target = {target} ({ReplayRecorder.Describe(events[target])}); keeping {prefix.Count} events, {segments.Count} redo segment(s), expected checksum = {(expected.HasValue ? expected.Value.ToString() : "n/a")}");
 
             var header = CloneHeader(replay);
 
-            var ok = await RebuildAndReplay(header, prefix, expected);
+            var ok = await RebuildAndReplay(header, prefix, expected, expectedState);
 
             // Push redo segments on top of the existing stack so that the earliest one is popped first.
             // (Older entries stay valid: they are only reachable after the newer ones are redone.)
@@ -333,7 +334,7 @@ internal static class RewindEngine
         RewardIds = replay.rewardIds.ToList(),
     };
 
-    private static async Task<bool> RebuildAndReplay(ReplayHeader header, List<CombatReplayEvent> prefix, uint? expectedChecksum)
+    private static async Task<bool> RebuildAndReplay(ReplayHeader header, List<CombatReplayEvent> prefix, uint? expectedChecksum, NetFullCombatState? expectedState)
     {
         var game = NGame.Instance!;
         var rm = RunManager.Instance;
@@ -427,7 +428,11 @@ internal static class RewindEngine
                 var actual = rec.CurrentChecksum();
                 if (actual.HasValue && actual.Value != expectedChecksum.Value)
                 {
-                    Log.Write($"WARNING: state checksum mismatch after undo: expected {expectedChecksum.Value}, got {actual.Value}");
+                    Log.Write($"WARNING: state checksum mismatch after undo: expected {expectedChecksum.Value}, got {actual.Value}
+EXPECTED STATE
+{expectedState}
+ACTUAL STATE
+{rec.CurrentState()}");
                     UndoAndRedoMod.Toast("Undo: state mismatch detected (see log)");
                 }
                 else if (actual.HasValue)
@@ -512,56 +517,91 @@ internal static class RewindEngine
         var rm = RunManager.Instance;
         var cm = CombatManager.Instance;
         var fed = new List<GameAction>();
-        int n = 0;
-        var fsw = System.Diagnostics.Stopwatch.StartNew();
-        foreach (var ev in events)
+        int turnStarts = 0;
+        Action<CombatState> onTurnStarted = _ => turnStarts++;
+        cm.TurnStarted += onTurnStarted;
+        try
         {
-            n++;
-            long evStart = fsw.ElapsedMilliseconds;
-            switch (ev.eventType)
+            int n = 0;
+            var fsw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var ev in events)
             {
-                case CombatReplayEventType.GameAction:
+                n++;
+                long evStart = fsw.ElapsedMilliseconds;
+                switch (ev.eventType)
                 {
-                    while (cm.EndingPlayerTurnPhaseOne || cm.EndingPlayerTurnPhaseTwo)
-                        await NextFrame();
-                    var player = runState.GetPlayer(ev.playerId!.Value);
-                    var action = ev.action!.ToGameAction(player);
-                    if (action.ActionType == GameActionType.CombatPlayPhaseOnly)
+                    case CombatReplayEventType.GameAction:
                     {
-                        while (cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Enemy)
+                        while (cm.IsInProgress && (cm.EndingPlayerTurnPhaseOne || cm.EndingPlayerTurnPhaseTwo))
                             await NextFrame();
+                        var player = runState.GetPlayer(ev.playerId!.Value);
+                        var action = ev.action!.ToGameAction(player);
+                        if (action.ActionType == GameActionType.CombatPlayPhaseOnly)
+                        {
+                            while (cm.IsInProgress && (cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Enemy
+                                   || rm.ActionQueueSynchronizer.CombatState != ActionSynchronizerCombatState.PlayPhase))
+                                await NextFrame();
+                        }
+                        if (!cm.IsInProgress) break;
+                        rm.ActionQueueSet.EnqueueWithoutSynchronizing(action);
+                        fed.Add(action);
+
+                        // Never run ahead of the game (the game's own replay loop does, and diverges when an
+                        // action pauses for a player choice): wait for this action to actually start, and for
+                        // turn transitions to complete, before feeding the next event.
+                        if (action is ReadyToBeginEnemyTurnAction)
+                        {
+                            int before = turnStarts;
+                            await WaitUntil(() => !cm.IsInProgress
+                                                  || (turnStarts > before
+                                                      && cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Player
+                                                      && rm.ActionQueueSynchronizer.CombatState == ActionSynchronizerCombatState.PlayPhase
+                                                      && !cm.EndingPlayerTurnPhaseOne && !cm.EndingPlayerTurnPhaseTwo),
+                                            60, $"next player turn after event #{n}");
+                        }
+                        else if (action is EndPlayerTurnAction)
+                        {
+                            await WaitUntil(() => !cm.IsInProgress || IsDone(action), 30, $"end turn event #{n}");
+                        }
+                        else
+                        {
+                            await WaitUntil(() => !cm.IsInProgress
+                                                  || action.State != GameActionState.WaitingForExecution
+                                                  || fed.Any(a => a.State is GameActionState.GatheringPlayerChoice),
+                                            30, $"start of event #{n} {action.GetType().Name}");
+                        }
+                        Log.Write($"    feed #{n} {action.GetType().Name}: {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, state={action.State})");
+                        break;
                     }
-                    rm.ActionQueueSet.EnqueueWithoutSynchronizing(action);
-                    fed.Add(action);
-                    if (action is EndPlayerTurnAction || action is ReadyToBeginEnemyTurnAction)
+                    case CombatReplayEventType.HookAction:
                     {
-                        await rm.ActionExecutor.FinishedExecutingActions();
-                        Log.Write($"    feed #{n} {action.GetType().Name}: waited {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, frames {_frameCounter})");
+                        var hook = rm.ActionQueueSynchronizer.GetHookActionForId(ev.hookId!.Value, ev.playerId!.Value, ev.gameActionType!.Value);
+                        rm.ActionQueueSet.EnqueueWithoutSynchronizing(hook);
+                        fed.Add(hook);
+                        break;
                     }
-                    break;
+                    case CombatReplayEventType.ResumeAction:
+                        rm.ActionQueueSet.ResumeActionWithoutSynchronizing(ev.actionId!.Value);
+                        break;
+                    case CombatReplayEventType.PlayerChoice:
+                    {
+                        var player = runState.GetPlayer(ev.playerId!.Value);
+                        rm.PlayerChoiceSynchronizer.ReceiveReplayChoice(player, ev.choiceId!.Value, ev.playerChoiceResult!.Value);
+                        break;
+                    }
+                    default:
+                        throw new InvalidOperationException($"Unknown replay event type {ev.eventType}");
                 }
-                case CombatReplayEventType.HookAction:
-                {
-                    var hook = rm.ActionQueueSynchronizer.GetHookActionForId(ev.hookId!.Value, ev.playerId!.Value, ev.gameActionType!.Value);
-                    rm.ActionQueueSet.EnqueueWithoutSynchronizing(hook);
-                    fed.Add(hook);
-                    break;
-                }
-                case CombatReplayEventType.ResumeAction:
-                    rm.ActionQueueSet.ResumeActionWithoutSynchronizing(ev.actionId!.Value);
-                    break;
-                case CombatReplayEventType.PlayerChoice:
-                {
-                    var player = runState.GetPlayer(ev.playerId!.Value);
-                    rm.PlayerChoiceSynchronizer.ReceiveReplayChoice(player, ev.choiceId!.Value, ev.playerChoiceResult!.Value);
-                    break;
-                }
-                default:
-                    throw new InvalidOperationException($"Unknown replay event type {ev.eventType}");
             }
+            Log.Write($"Fed {n} events ({fed.Count} actions)");
         }
-        Log.Write($"Fed {n} events ({fed.Count} actions)");
+        finally
+        {
+            cm.TurnStarted -= onTurnStarted;
+        }
         return fed;
+
+        static bool IsDone(GameAction a) => a.State is GameActionState.Finished or GameActionState.Canceled;
     }
 
     /// <summary>

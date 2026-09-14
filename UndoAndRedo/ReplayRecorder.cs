@@ -55,6 +55,7 @@ internal sealed class ReplayRecorder
     private readonly Dictionary<uint, int> _idToRoot = new();
     private readonly Dictionary<int, TrackedAction> _tracked = new();
     private readonly Dictionary<int, uint> _checksumBefore = new();
+    private readonly Dictionary<int, NetFullCombatState> _stateBefore = new();
     private CombatReplay? _lastSeenReplay;
 
     public static void VerifyReflection()
@@ -124,6 +125,16 @@ internal sealed class ReplayRecorder
     /// <summary>Checksum recorded right before the player decision at <paramref name="eventIndex"/> started executing.</summary>
     public uint? ChecksumBefore(int eventIndex) => _checksumBefore.TryGetValue(eventIndex, out var c) ? c : null;
 
+    /// <summary>Full state captured together with <see cref="ChecksumBefore"/> (for diffing on mismatch).</summary>
+    public NetFullCombatState? StateBefore(int eventIndex) => _stateBefore.TryGetValue(eventIndex, out var st) ? st : null;
+
+    /// <summary>Full live combat state snapshot (same structure the game hashes for desync detection).</summary>
+    public NetFullCombatState? CurrentState()
+    {
+        try { var rs = RunState; return rs == null ? null : NetFullCombatState.FromRun(rs, null); }
+        catch (Exception ex) { Log.Write($"State capture failed: {ex.Message}"); return null; }
+    }
+
     /// <summary>Checksum of the live combat state right now (same function multiplayer uses for desync detection).</summary>
     public uint? CurrentChecksum()
     {
@@ -175,6 +186,7 @@ internal sealed class ReplayRecorder
         _idToRoot.Clear();
         _tracked.Clear();
         _checksumBefore.Clear();
+        _stateBefore.Clear();
         _lastSeenReplay = Replay;
         Log.Write($"Recorder: tracking reset ({why})");
     }
@@ -257,9 +269,12 @@ internal sealed class ReplayRecorder
             if (!_combat.IsInProgress || !IsPlayerDecision(action)) return;
             var tracked = _tracked.Values.FirstOrDefault(t => ReferenceEquals(t.Action, action));
             if (tracked == null) return;
-            var sum = CurrentChecksum();
-            if (sum.HasValue)
-                _checksumBefore[tracked.EventIndex] = sum.Value;
+            var state = CurrentState();
+            if (state != null)
+            {
+                _checksumBefore[tracked.EventIndex] = _checksums.GenerateChecksum(state);
+                _stateBefore[tracked.EventIndex] = state;
+            }
         }
         catch (Exception ex)
         {

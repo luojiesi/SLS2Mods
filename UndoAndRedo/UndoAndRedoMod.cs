@@ -211,6 +211,9 @@ internal static class Patch_NHandCardHolder_SnapWhileReplaying
     {
         if (!RewindEngine.ReplayModeActive || TargetPos == null) return true;
         if (TargetPos.GetValue(__instance) is Vector2 t) __instance.Position = t;
+        // The original loop re-enables the card's hitbox once it is near its target; keep that behaviour.
+        try { if (!__instance.Hitbox.IsEnabled) __instance.Hitbox.SetEnabled(enabled: true); }
+        catch (Exception ex) { Log.Write($"hitbox enable failed: {ex.Message}"); }
         __result = Task.CompletedTask;
         return false;
     }
