@@ -202,6 +202,14 @@ internal static class RewindEngine
 
             var header = CloneHeader(replay);
 
+            // Fast path research (inert unless logs/UndoAndRedo.fastpath says "shadow"): trial restore, then
+            // put the live state back so the authoritative replay below starts from an untouched state.
+            if (FastPath.FastPath.Mode == FastPath.FastPathMode.Shadow && rec.FastBefore(target) is { } fastBefore)
+            {
+                try { FastPath.FastPath.ShadowTrial(rec, target, fastBefore, expected, expectedShadow); }
+                catch (Exception ex) { Log.Write($"fastpath shadow trial error: {ex}"); }
+            }
+
             var ok = await RebuildAndReplay(header, prefix, expected, expectedState);
             if (ok && expectedShadow != null)
             {

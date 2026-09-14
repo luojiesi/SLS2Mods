@@ -57,6 +57,7 @@ internal sealed class ReplayRecorder
     private readonly Dictionary<int, uint> _checksumBefore = new();
     private readonly Dictionary<int, NetFullCombatState> _stateBefore = new();
     private readonly Dictionary<int, ShadowSnapshot.Snapshot> _shadowBefore = new();
+    private readonly Dictionary<int, FastPath.ModelSnapshot> _fastBefore = new();
     private CombatReplay? _lastSeenReplay;
 
     public static void VerifyReflection()
@@ -132,6 +133,9 @@ internal sealed class ReplayRecorder
     /// <summary>Reflective model-graph snapshot taken before the decision at <paramref name="eventIndex"/> (research).</summary>
     public ShadowSnapshot.Snapshot? ShadowBefore(int eventIndex) => _shadowBefore.TryGetValue(eventIndex, out var sh) ? sh : null;
 
+    /// <summary>Fast-path model memento taken before the decision at <paramref name="eventIndex"/> (research).</summary>
+    public FastPath.ModelSnapshot? FastBefore(int eventIndex) => _fastBefore.TryGetValue(eventIndex, out var fs) ? fs : null;
+
     /// <summary>Full live combat state snapshot (same structure the game hashes for desync detection).</summary>
     public NetFullCombatState? CurrentState()
     {
@@ -192,6 +196,7 @@ internal sealed class ReplayRecorder
         _checksumBefore.Clear();
         _stateBefore.Clear();
         _shadowBefore.Clear();
+        _fastBefore.Clear();
         _lastSeenReplay = Replay;
         Log.Write($"Recorder: tracking reset ({why})");
     }
@@ -283,13 +288,18 @@ internal sealed class ReplayRecorder
                 _checksumBefore[tracked.EventIndex] = _checksums.GenerateChecksum(state);
                 _stateBefore[tracked.EventIndex] = state;
             }
-            if (RewindEngine.ReplayModeActive || !ShadowSnapshot.Enabled) return; // research captures only for live decisions
-            var shadow = ShadowSnapshot.Capture($"before event {tracked.EventIndex} ({action.GetType().Name})");
-            if (shadow != null)
+            if (RewindEngine.ReplayModeActive) return; // research captures only for live decisions
+            if (ShadowSnapshot.Enabled)
             {
-                _shadowBefore[tracked.EventIndex] = shadow;
-                Log.Write($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
+                var shadow = ShadowSnapshot.Capture($"before event {tracked.EventIndex} ({action.GetType().Name})");
+                if (shadow != null)
+                {
+                    _shadowBefore[tracked.EventIndex] = shadow;
+                    Log.Write($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
+                }
             }
+            var fast = FastPath.FastPath.CaptureBeforeDecision(tracked.EventIndex, action.GetType().Name);
+            if (fast != null) _fastBefore[tracked.EventIndex] = fast;
         }
         catch (Exception ex)
         {
