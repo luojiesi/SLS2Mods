@@ -40,7 +40,7 @@ internal sealed class ModelSnapshot
 
     public int ObjectCount => _objects.Count + _arrays.Count;
     public double CaptureMs { get; private set; }
-    public string Label { get; private set; } = "";
+    public string Label { get; set; } = "";
 
     // ── type classification ──────────────────────────────────────────────────
 

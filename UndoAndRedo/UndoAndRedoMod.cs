@@ -4,6 +4,8 @@ using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Assets;
 using MegaCrit.Sts2.Core.Entities.Encounters;
 using MegaCrit.Sts2.Core.Modding;
+using MegaCrit.Sts2.Core.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
@@ -70,6 +72,7 @@ public static class UndoAndRedoMod
         Log.Write($"UndoAndRedo {Version} initializing");
         ReplayRecorder.VerifyReflection();
         RewindEngine.VerifyReflection();
+        FastPath.FastPath.VerifyReflection();
 
         var harmony = new Harmony("com.undoandredo.sts2");
         harmony.PatchAll(typeof(UndoAndRedoMod).Assembly);
@@ -140,6 +143,25 @@ internal static class Patch_NGame_Input
     }
 }
 
+/// <summary>
+/// Every singleplayer run gets the switchable net service, not only runs rebuilt by the replay path. Redo feeds
+/// recorded events into the live game in replay mode; with the game's own service (Type == Singleplayer) the
+/// combat manager would still enqueue its own turn-transition action next to the recorded one.
+/// </summary>
+[HarmonyPatch(typeof(RunManager), "InitializeShared")]
+internal static class Patch_RunManager_InitializeShared
+{
+    [HarmonyPrefix]
+    public static void Prefix(ref INetGameService netService)
+    {
+        if (netService is NetSingleplayerGameService inner)
+        {
+            netService = new RewindNetGameService(inner);
+            Log.Write("Net service wrapped (singleplayer run)");
+        }
+    }
+}
+
 /// <summary>A run has been set up (new, loaded, or rebuilt by us): attach the recorder to its action queue.</summary>
 [HarmonyPatch(typeof(RunManager), nameof(RunManager.Launch))]
 internal static class Patch_RunManager_Launch
@@ -197,7 +219,8 @@ internal static class Patch_PreloadManager_LoadRoomCombatAssets
 
 /// <summary>
 /// Hand card holders move with per-frame Lerp(target, delta * k) loops whose weight is not clamped, so any
-/// time scale above 1 (or a slow frame) makes them diverge to infinity. While replaying, move them instantly.
+/// time scale above 1 (or a slow frame) makes them diverge to infinity. While replaying or while the fast path
+/// rebuilds the hand, move them instantly.
 /// </summary>
 [HarmonyPatch(typeof(NHandCardHolder))]
 internal static class Patch_NHandCardHolder_SnapWhileReplaying
@@ -205,11 +228,12 @@ internal static class Patch_NHandCardHolder_SnapWhileReplaying
     private static readonly FieldInfo? TargetPos = AccessTools.Field(typeof(NHandCardHolder), "_targetPosition");
     private static readonly FieldInfo? TargetAngle = AccessTools.Field(typeof(NHandCardHolder), "_targetAngle");
     private static readonly FieldInfo? TargetScale = AccessTools.Field(typeof(NHandCardHolder), "_targetScale");
+    private static bool SnapActive => RewindEngine.ReplayModeActive || FastPath.FastPath.VisualSyncActive;
 
     [HarmonyPrefix, HarmonyPatch("AnimPosition")]
     public static bool AnimPosition(NHandCardHolder __instance, ref Task __result)
     {
-        if (!RewindEngine.ReplayModeActive || TargetPos == null) return true;
+        if (!SnapActive || TargetPos == null) return true;
         if (TargetPos.GetValue(__instance) is Vector2 t) __instance.Position = t;
         // The original loop re-enables the card's hitbox once it is near its target; keep that behaviour.
         try { if (!__instance.Hitbox.IsEnabled) __instance.Hitbox.SetEnabled(enabled: true); }
@@ -221,7 +245,7 @@ internal static class Patch_NHandCardHolder_SnapWhileReplaying
     [HarmonyPrefix, HarmonyPatch("AnimAngle")]
     public static bool AnimAngle(NHandCardHolder __instance, ref Task __result)
     {
-        if (!RewindEngine.ReplayModeActive || TargetAngle == null) return true;
+        if (!SnapActive || TargetAngle == null) return true;
         if (TargetAngle.GetValue(__instance) is float a) __instance.RotationDegrees = a;
         __result = Task.CompletedTask;
         return false;
@@ -230,7 +254,7 @@ internal static class Patch_NHandCardHolder_SnapWhileReplaying
     [HarmonyPrefix, HarmonyPatch("AnimScale")]
     public static bool AnimScale(NHandCardHolder __instance, ref Task __result)
     {
-        if (!RewindEngine.ReplayModeActive || TargetScale == null) return true;
+        if (!SnapActive || TargetScale == null) return true;
         if (TargetScale.GetValue(__instance) is Vector2 sc) __instance.Scale = sc;
         __result = Task.CompletedTask;
         return false;

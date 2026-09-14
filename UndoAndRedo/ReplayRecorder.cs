@@ -57,7 +57,7 @@ internal sealed class ReplayRecorder
     private readonly Dictionary<int, uint> _checksumBefore = new();
     private readonly Dictionary<int, NetFullCombatState> _stateBefore = new();
     private readonly Dictionary<int, ShadowSnapshot.Snapshot> _shadowBefore = new();
-    private readonly Dictionary<int, FastPath.ModelSnapshot> _fastBefore = new();
+    private readonly Dictionary<int, FastPath.FastPath.Capture> _fastBefore = new();
     private CombatReplay? _lastSeenReplay;
 
     public static void VerifyReflection()
@@ -133,8 +133,24 @@ internal sealed class ReplayRecorder
     /// <summary>Reflective model-graph snapshot taken before the decision at <paramref name="eventIndex"/> (research).</summary>
     public ShadowSnapshot.Snapshot? ShadowBefore(int eventIndex) => _shadowBefore.TryGetValue(eventIndex, out var sh) ? sh : null;
 
-    /// <summary>Fast-path model memento taken before the decision at <paramref name="eventIndex"/> (research).</summary>
-    public FastPath.ModelSnapshot? FastBefore(int eventIndex) => _fastBefore.TryGetValue(eventIndex, out var fs) ? fs : null;
+    /// <summary>Fast-path model memento taken before the decision at <paramref name="eventIndex"/>.</summary>
+    public FastPath.FastPath.Capture? FastBefore(int eventIndex) => _fastBefore.TryGetValue(eventIndex, out var fs) ? fs : null;
+
+    /// <summary>
+    /// After a fast undo the live event stream is cut to <paramref name="keepCount"/> events without a
+    /// rebuild; drop the bookkeeping for everything after that so later analysis sees a consistent stream.
+    /// </summary>
+    public void TruncateTracking(int keepCount)
+    {
+        foreach (var k in _eventInfo.Keys.Where(k => k >= keepCount).ToList()) _eventInfo.Remove(k);
+        foreach (var k in _tracked.Keys.Where(k => k >= keepCount).ToList()) _tracked.Remove(k);
+        foreach (var k in _checksumBefore.Keys.Where(k => k >= keepCount).ToList()) _checksumBefore.Remove(k);
+        foreach (var k in _stateBefore.Keys.Where(k => k >= keepCount).ToList()) _stateBefore.Remove(k);
+        foreach (var k in _shadowBefore.Keys.Where(k => k >= keepCount).ToList()) _shadowBefore.Remove(k);
+        foreach (var k in _fastBefore.Keys.Where(k => k >= keepCount).ToList()) _fastBefore.Remove(k);
+        foreach (var k in _idToRoot.Where(kv => kv.Value >= keepCount).Select(kv => kv.Key).ToList()) _idToRoot.Remove(k);
+        Log.Write($"Recorder: tracking truncated to {keepCount} events");
+    }
 
     /// <summary>Full live combat state snapshot (same structure the game hashes for desync detection).</summary>
     public NetFullCombatState? CurrentState()
@@ -288,7 +304,11 @@ internal sealed class ReplayRecorder
                 _checksumBefore[tracked.EventIndex] = _checksums.GenerateChecksum(state);
                 _stateBefore[tracked.EventIndex] = state;
             }
-            if (RewindEngine.ReplayModeActive) return; // research captures only for live decisions
+            // The fast-path memento is taken for live and replayed decisions alike (replayed ones become the
+            // snapshots for undos after a redo); the research snapshot only for live ones.
+            var fast = FastPath.FastPath.CaptureBeforeDecision(tracked.EventIndex, action);
+            if (fast != null) _fastBefore[tracked.EventIndex] = fast;
+            if (RewindEngine.ReplayModeActive) return;
             if (ShadowSnapshot.Enabled)
             {
                 var shadow = ShadowSnapshot.Capture($"before event {tracked.EventIndex} ({action.GetType().Name})");
@@ -298,8 +318,6 @@ internal sealed class ReplayRecorder
                     Log.Write($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
                 }
             }
-            var fast = FastPath.FastPath.CaptureBeforeDecision(tracked.EventIndex, action.GetType().Name);
-            if (fast != null) _fastBefore[tracked.EventIndex] = fast;
         }
         catch (Exception ex)
         {

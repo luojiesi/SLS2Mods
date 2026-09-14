@@ -19,7 +19,12 @@ namespace UndoAndRedo;
 /// </summary>
 internal sealed class RewindNetGameService : INetGameService
 {
-    private readonly NetSingleplayerGameService _inner = new();
+    private readonly NetSingleplayerGameService _inner;
+
+    public RewindNetGameService() : this(new NetSingleplayerGameService()) { }
+
+    /// <summary>Wraps the service the game created itself (see <c>Patch_RunManager_InitializeShared</c>).</summary>
+    public RewindNetGameService(NetSingleplayerGameService inner) { _inner = inner; }
 
     public ulong NetId => _inner.NetId;
     public bool IsConnected => _inner.IsConnected;

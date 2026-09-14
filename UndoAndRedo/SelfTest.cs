@@ -11,6 +11,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Rooms;
@@ -83,12 +84,23 @@ internal static class SelfTest
         if (!await RewindEngine.WaitUntil(() => game.MainMenu != null, 30, "main menu")) return false;
         var menu = game.MainMenu!;
         var readField = AccessTools.Field(typeof(NMainMenu), "_readRunSaveResult");
-        if (!await RewindEngine.WaitUntil(() => readField?.GetValue(menu) != null, 30, "run save read")) return false;
-        var continueMethod = AccessTools.Method(typeof(NMainMenu), "OnContinueButtonPressedAsync");
-        if (continueMethod == null) { Log.Write("SELFTEST: OnContinueButtonPressedAsync not found"); return false; }
+        await RewindEngine.WaitUntil(() => readField?.GetValue(menu) != null, 5, "run save read");
+        var saveResult = readField?.GetValue(menu);
+        var saveData = saveResult?.GetType().GetProperty("SaveData")?.GetValue(saveResult);
         for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
-        Log.Write("SELFTEST: continuing run");
-        await (Task)continueMethod.Invoke(menu, null)!;
+        if (saveData != null)
+        {
+            var continueMethod = AccessTools.Method(typeof(NMainMenu), "OnContinueButtonPressedAsync");
+            if (continueMethod == null) { Log.Write("SELFTEST: OnContinueButtonPressedAsync not found"); return false; }
+            Log.Write("SELFTEST: continuing saved run");
+            await (Task)continueMethod.Invoke(menu, null)!;
+        }
+        else
+        {
+            Log.Write("SELFTEST: no saved run; starting an unsaved Ironclad run");
+            await game.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), shouldSave: false, ActModel.GetDefaultList(),
+                                               Array.Empty<ModifierModel>(), "UNDOTEST", GameMode.Standard);
+        }
 
         var rm = RunManager.Instance;
         var cm = CombatManager.Instance;
@@ -175,6 +187,8 @@ internal static class SelfTest
         Log.Write($"SELFTEST: {actionsTaken} actions taken, {replay.events.Count} events recorded, undo depth {depth}, checksum {before}, hp {me.Creature.CurrentHp}, round {cm.DebugOnlyGetState()?.RoundNumber}");
 
         // 3. Undo everything, one step at a time (the first undo is the most expensive: it replays every earlier turn).
+        Shot("before_undo");
+        bool visualsOk = VisualCheck("before undo");
         int undone = 0;
         for (int i = 0; i < depth; i++)
         {
@@ -183,6 +197,9 @@ internal static class SelfTest
             Log.Write($"SELFTEST: undo #{i + 1} -> {(ok ? "ok" : "FAILED")}; hp {me2()?.Creature.CurrentHp} round {cm.DebugOnlyGetState()?.RoundNumber} events {ReplayRecorder.Current?.Replay?.events.Count}");
             if (!ok) return false;
             undone++;
+            for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+            Shot($"undo_{i + 1}");
+            visualsOk &= VisualCheck($"after undo #{i + 1}");
         }
 
         // 4. Redo everything.
@@ -194,18 +211,108 @@ internal static class SelfTest
             Log.Write($"SELFTEST: redo #{i + 1} -> {(ok ? "ok" : "FAILED")}; hp {me2()?.Creature.CurrentHp} round {cm.DebugOnlyGetState()?.RoundNumber} events {ReplayRecorder.Current?.Replay?.events.Count}");
             if (!ok) break;
             redone++;
+            for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+            Shot($"redo_{i + 1}");
+            visualsOk &= VisualCheck($"after redo #{i + 1}");
         }
 
         uint? after = ReplayRecorder.Current?.CurrentChecksum();
         Log.Write($"SELFTEST: undone {undone}, redone {redone}, checksum before {before} after {after}");
 
-        // 5. One more undo + redo round trip after live play resumed, then a final undo.
+        // 5. One more undo after live play resumed (after a replay-based redo this exercises the snapshots
+        //    taken while replaying), then play one card live and undo that too.
         bool finalOk = await RewindEngine.UndoAsync();
         Log.Write($"SELFTEST: final undo -> {(finalOk ? "ok" : "FAILED")}");
+        for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+        Shot("final_undo");
+        visualsOk &= VisualCheck("after final undo");
+        bool liveOk = false;
+        if (finalOk && await RewindEngine.WaitForIdlePlayPhase(30))
+        {
+            var meNow = me2()!;
+            CardModel? Playable() => meNow.PlayerCombatState!.Hand.Cards.FirstOrDefault(c => c.CanPlay(out UnplayableReason _, out AbstractModel? _) && c.TargetType != TargetType.AnyEnemy)
+                                     ?? meNow.PlayerCombatState.Hand.Cards.FirstOrDefault(c => c.CanPlay(out UnplayableReason _, out AbstractModel? _));
+            var card = Playable();
+            if (card == null)
+            {
+                Log.Write("SELFTEST: nothing playable here; undoing one more step for the live-play check");
+                if (await RewindEngine.UndoAsync() && await RewindEngine.WaitForIdlePlayPhase(30)) { meNow = me2()!; card = Playable(); }
+            }
+            if (card != null)
+            {
+                Creature? target = card.TargetType == TargetType.AnyEnemy ? meNow.Creature.CombatState?.HittableEnemies.FirstOrDefault() : null;
+                uint? sumBeforePlay = ReplayRecorder.Current?.CurrentChecksum();
+                Log.Write($"SELFTEST: live play after undo: {card.Id.Entry} -> {target?.Name ?? "none"}");
+                rm.ActionQueueSynchronizer.RequestEnqueue(new PlayCardAction(card, target));
+                for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+                if (await RewindEngine.WaitForIdlePlayPhase(30))
+                {
+                    for (int f = 0; f < 10; f++) await RewindEngine.NextFrame();
+                    Shot("live_play");
+                    bool ok2 = await RewindEngine.UndoAsync();
+                    uint? sumAfterUndo = ReplayRecorder.Current?.CurrentChecksum();
+                    liveOk = ok2 && sumBeforePlay.HasValue && sumBeforePlay == sumAfterUndo;
+                    Log.Write($"SELFTEST: undo of live play -> {(ok2 ? "ok" : "FAILED")}; checksum {sumBeforePlay} -> {sumAfterUndo} ({(liveOk ? "match" : "MISMATCH")})");
+                    for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+                    Shot("live_play_undone");
+                    visualsOk &= VisualCheck("after undo of live play");
+                }
+            }
+            else
+            {
+                Log.Write("SELFTEST: no playable card for the live-play check; skipping");
+                liveOk = true;
+            }
+        }
+        Log.Write($"SELFTEST: visuals {(visualsOk ? "consistent" : "INCONSISTENT")}");
 
-        return undone == depth && redone == undone && before.HasValue && before == after && finalOk;
+        return undone == depth && redone == undone && before.HasValue && before == after && finalOk && liveOk && visualsOk;
 
         static Player? me2() => RunManager.Instance.DebugOnlyGetState()?.Players[0];
+    }
+
+    private static void Shot(string name)
+    {
+        try
+        {
+            var img = NGame.Instance!.GetViewport().GetTexture().GetImage();
+            var dir = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "selftest");
+            System.IO.Directory.CreateDirectory(dir);
+            img.SavePng(System.IO.Path.Combine(dir, name + ".png"));
+        }
+        catch (Exception ex) { Log.Write($"SELFTEST shot {name} failed: {ex.Message}"); }
+    }
+
+    /// <summary>Compares what is on screen with the model: hand cards (same models, same order), living creatures, potions.</summary>
+    private static bool VisualCheck(string when)
+    {
+        try
+        {
+            var rs = RunManager.Instance.DebugOnlyGetState()!;
+            var cs = CombatManager.Instance.DebugOnlyGetState()!;
+            var me = rs.Players[0];
+            var room = MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance;
+            var hand = MegaCrit.Sts2.Core.Nodes.Combat.NPlayerHand.Instance;
+            int modelHand = me.PlayerCombatState!.Hand.Cards.Count;
+            int shownHand = hand?.ActiveHolders.Count ?? -1;
+            var shownCards = hand?.ActiveHolders.Select(h => h.CardNode.Model).ToList() ?? new List<CardModel>();
+            bool sameCards = shownCards.Count == modelHand && shownCards.Zip(me.PlayerCombatState.Hand.Cards).All(p => ReferenceEquals(p.First, p.Second));
+            int modelAlive = cs.Creatures.Count(c => !c.IsDead);
+            int shownAlive = room?.CreatureNodes.Count(n => !n.Entity.IsDead) ?? -1;
+            var potions = NRun.Instance?.GlobalUi.TopBar.PotionContainer;
+            var holdersField = AccessTools.Field(typeof(MegaCrit.Sts2.Core.Nodes.Potions.NPotionContainer), "_holders");
+            var holders = holdersField?.GetValue(potions) as System.Collections.IList;
+            int shownPotions = holders?.Cast<MegaCrit.Sts2.Core.Nodes.Potions.NPotionHolder>().Count(h => h.Potion != null) ?? -1;
+            int modelPotions = me.Potions.Count();
+            bool ok = sameCards && modelAlive == shownAlive && modelPotions == shownPotions;
+            Log.Write($"SELFTEST VISUAL ({when}): hand model={modelHand} shown={shownHand} sameCards={sameCards}; alive model={modelAlive} shown={shownAlive}; potions model={modelPotions} shown={shownPotions}; energy {me.PlayerCombatState.Energy}/{me.PlayerCombatState.MaxEnergy} -> {(ok ? "OK" : "MISMATCH")}");
+            return ok;
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"SELFTEST VISUAL ({when}) error: {ex.Message}");
+            return false;
+        }
     }
 }
 

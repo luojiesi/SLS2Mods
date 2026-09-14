@@ -202,15 +202,29 @@ internal static class RewindEngine
 
             var header = CloneHeader(replay);
 
-            // Fast path research (inert unless logs/UndoAndRedo.fastpath says "shadow"): trial restore, then
-            // put the live state back so the authoritative replay below starts from an untouched state.
-            if (FastPath.FastPath.Mode == FastPath.FastPathMode.Shadow && rec.FastBefore(target) is { } fastBefore)
+            // Fast path (logs/UndoAndRedo.fastpath): "on" restores the model from the memento taken before the
+            // undone decision and rebuilds the visuals; the replay below is only the fallback. "shadow" runs a
+            // trial restore, puts the live state back, and always replays.
+            bool fastDone = false;
+            var fastMode = FastPath.FastPath.Mode;
+            if (fastMode != FastPath.FastPathMode.Off)
             {
-                try { FastPath.FastPath.ShadowTrial(rec, target, fastBefore, expected, expectedShadow); }
-                catch (Exception ex) { Log.Write($"fastpath shadow trial error: {ex}"); }
+                var capture = rec.FastBefore(target);
+                if (capture == null)
+                    Log.Write($"fastpath: no memento for event {target}; using replay");
+                else if (fastMode == FastPath.FastPathMode.Shadow)
+                {
+                    try { FastPath.FastPath.ShadowTrial(rec, target, capture, expected, expectedShadow); }
+                    catch (Exception ex) { Log.Write($"fastpath shadow trial error: {ex}"); }
+                }
+                else
+                {
+                    try { fastDone = await FastPath.FastPath.TryFastUndo(rec, target, capture, expected, prefix.Count); }
+                    catch (Exception ex) { Log.Write($"fastpath undo error (falling back to replay): {ex}"); }
+                }
             }
 
-            var ok = await RebuildAndReplay(header, prefix, expected, expectedState);
+            var ok = fastDone || await RebuildAndReplay(header, prefix, expected, expectedState);
             if (ok && expectedShadow != null)
             {
                 var actualShadow = ShadowSnapshot.Capture($"after undo to event {target}");
@@ -232,8 +246,8 @@ internal static class RewindEngine
             for (int i = entries.Count - 1; i >= 0; i--) _redo.Add(entries[i]);
 
             int remaining = ReplayRecorder.Boundaries(prefix).Count;
-            Log.Write($"=== UNDO {(ok ? "complete" : "FAILED")} in {sw.ElapsedMilliseconds} ms; undo depth left {remaining}, redo {_redo.Count} ===");
-            UndoAndRedoMod.Toast(ok ? $"Undo  ({remaining} left, {_redo.Count} redo)" : "Undo failed — see UndoAndRedo.log");
+            Log.Write($"=== UNDO {(ok ? "complete" : "FAILED")} via {(fastDone ? "fast path" : "replay")} in {sw.ElapsedMilliseconds} ms; undo depth left {remaining}, redo {_redo.Count} ===");
+            UndoAndRedoMod.Toast(ok ? $"Undo{(fastDone ? "*" : "")}  ({remaining} left, {_redo.Count} redo)" : "Undo failed — see UndoAndRedo.log");
             return ok;
         }
         catch (Exception ex)
