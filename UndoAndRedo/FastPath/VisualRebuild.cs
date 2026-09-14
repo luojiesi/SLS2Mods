@@ -186,7 +186,15 @@ internal static class VisualRebuild
                     if (want != null)
                     {
                         var np = NPotion.Create(want);
-                        if (np != null) holder.AddPotion(np);
+                        if (np != null)
+                        {
+                            np.Position = new Vector2(-30f, -30f); // as NPotionContainer.Add does
+                            holder.AddPotion(np);
+                            // A new NPotion is invisible until the game's "newly acquired" animation fades it in;
+                            // show it as it looks when that animation has finished.
+                            var inner = np.GetNodeOrNull<Control>("Container");
+                            if (inner != null) { inner.Modulate = Colors.White; inner.Position = Vector2.Zero; }
+                        }
                     }
                     changed++;
                 }
