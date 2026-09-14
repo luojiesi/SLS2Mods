@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Characters;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Rooms;
@@ -97,9 +98,11 @@ internal static class SelfTest
         }
         else
         {
-            Log.Write("SELFTEST: no saved run; starting an unsaved Ironclad run");
+            string seed = "UNDOTEST";
+            try { var f = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.selftest.seed"); if (System.IO.File.Exists(f)) seed = System.IO.File.ReadAllText(f).Trim(); } catch { }
+            Log.Write($"SELFTEST: no saved run; starting an unsaved Ironclad run (seed {seed})");
             await game.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), shouldSave: false, ActModel.GetDefaultList(),
-                                               Array.Empty<ModifierModel>(), "UNDOTEST", GameMode.Standard);
+                                               Array.Empty<ModifierModel>(), seed, GameMode.Standard);
         }
 
         var rm = RunManager.Instance;
@@ -140,8 +143,27 @@ internal static class SelfTest
         var rec = ReplayRecorder.Current!;
         Log.Write($"SELFTEST: combat started, hand = {string.Join(",", me.PlayerCombatState!.Hand.Cards.Select(c => c.Id.Entry))}");
 
-        // 2. Play a few turns via the same action path the UI uses.
+        // 2. Play a few turns via the same action path the UI uses. A Block Potion is given first and used as
+        //    the very first decision, so potion undo (belt visuals) is covered.
         int actionsTaken = 0;
+        try
+        {
+            var procure = await PotionCmd.TryToProcure<BlockPotion>(me);
+            for (int f = 0; f < 30; f++) await RewindEngine.NextFrame();
+            var potion = procure.success ? procure.potion : me.Potions.FirstOrDefault();
+            if (potion != null && cm.IsInProgress)
+            {
+                Log.Write($"SELFTEST: using potion {potion.Id.Entry} (slot {me.GetPotionSlotIndex(potion)})");
+                rm.ActionQueueSynchronizer.RequestEnqueue(new UsePotionAction(potion, null, isCombatInProgress: true));
+                actionsTaken++;
+                for (int f = 0; f < 5; f++) await RewindEngine.NextFrame();
+                if (!await RewindEngine.WaitForIdlePlayPhase(30)) { Log.Write("SELFTEST: potion use did not settle"); return false; }
+                for (int f = 0; f < 30; f++) await RewindEngine.NextFrame();
+                Log.Write($"SELFTEST: after potion: block {me.Creature.Block}, potions {me.Potions.Count()}");
+            }
+            else Log.Write($"SELFTEST: no potion to use (procure success={procure.success})");
+        }
+        catch (Exception ex) { Log.Write($"SELFTEST: potion step failed: {ex.Message}"); }
         int turnsToPlay = 8;
         try { var f = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.selftest.turns"); if (System.IO.File.Exists(f)) turnsToPlay = int.Parse(System.IO.File.ReadAllText(f).Trim()); } catch { }
         for (int turn = 0; turn < turnsToPlay && cm.IsInProgress; turn++)

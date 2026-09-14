@@ -1,8 +1,18 @@
-# UndoAndRedo 2.0 — Combat rewind by deterministic replay
+# UndoAndRedo 2.1 — Combat rewind: snapshot fast path + deterministic replay
 
 Press **Left Arrow** to undo the last player decision in combat, **Right Arrow** to redo it.
 
 Targets Slay the Spire 2 **v0.107.1** (Godot 4.5 / .NET 9, HarmonyX). Singleplayer only.
+
+Two mechanisms, kept apart on purpose:
+
+* **Replay path** (`RewindEngine`, the original 2.0 design): rebuild the run from the game's own combat replay
+  and re-feed the recorded events. Always correct, ~0.4–1.5 s per undo. Redo always uses it (feeding the
+  removed events into the live game, 50–300 ms).
+* **Fast path** (`FastPath/`, 2.1): an in-place memento of the model object graph taken right before each
+  player decision; undo writes it back into the same objects (~1 ms), verifies the checksum, and rebuilds the
+  combat visuals from the model. ~100–120 ms per undo. Anything unverified falls back to the replay path.
+  See [Fast path](#fast-path).
 
 ## Why the rewrite
 
@@ -82,14 +92,68 @@ re-records itself through the same writer) and compares `NetFullCombatState` che
 recorder took right before the undone action originally executed. A mismatch is logged and shown as a toast
 but never blocks play.
 
+## Fast path
+
+Enabled by the file `<user data>/logs/UndoAndRedo.fastpath` containing `on` (`shadow` = dual-run research
+mode: trial restore, put the live state back, then replay as usual; anything else or no file = off, replay
+only). Results and timings go to `logs/UndoAndRedo.fastpath.log`.
+
+**Capture** (`ReplayRecorder.OnBeforeActionExecuted` → `FastPath.CaptureBeforeDecision`): right before a player
+decision starts executing, and only if that decision is the *only* queued action (no other queued actions, no
+pending resumptions), `ModelSnapshot.Capture` walks every object reachable from the roots (run state, combat
+manager, card db, action queue set/executor/synchronizers, checksum tracker, replay writer) and records every
+instance field and array element — 900–1500 objects, 1–4 ms. Godot objects, delegates/events, tasks, threading
+primitives, reflection metadata, loggers and canonical (immutable) models are neither walked nor restored.
+Captures happen for live decisions and for decisions fed by the replay path alike, so undo stays fast after a
+redo.
+
+**Undo** (`FastPath.TryFastUndo`), all under a freeze-frame cover with SFX muted and `Engine.TimeScale` = 25:
+
+1. Preconditions: action queue empty, executor idle, play phase, player side, no card play/selection in
+   progress, a recorded checksum exists. Otherwise → replay path.
+2. `Restore()` writes the memento back into the same instances (~1 ms). The `NetFullCombatState` checksum must
+   equal the one recorded at capture time; on mismatch the live state (captured just before) is put back and
+   the replay path runs.
+3. The undone decision is still at the front of the restored queue: it is removed, the queue's next action id
+   is set back to the decision's id, the executor's `CurrentlyRunningAction` is cleared, the game's replay log
+   and the recorder's bookkeeping are cut to the kept prefix. From here on redo works exactly as after a
+   replay-based undo.
+4. `VisualRebuild.Rebuild`: the `NCombatRoom` node is replaced through `NRun._roomContainer` by a fresh one
+   (`NCombatRoom.Create` + the room's own `OnCombatSetUp`), which builds creature nodes, HP/block/power
+   displays, piles, energy counter, end-turn button and background from the model the way a new combat does.
+   Freeing the old room drops every event subscription its nodes held. Then: nodes of dead/removed creatures
+   are dropped, creature screen positions are copied from the old room, hand cards are created from the hand
+   pile, the end-turn button gets its `OnTurnStarted`, intents are refreshed, orb slots/orbs are placed, potion
+   slots are synced to `Player.PotionSlots`, top-bar HP/gold and relic counters are refreshed, and
+   `CombatStateTracker.NotifyCombatStateChanged` makes every listener recompute. The room becomes the active
+   screen only after its UI has a state (doing it earlier crashes `NCombatUi.Enable`).
+5. Wait until the hand shows every card at its resting position (min 5 frames), uncover.
+
+If anything throws after step 2, the current room is made safe (`NCombatUi._state`) and the replay path takes
+over — it rebuilds everything from the save and does not depend on the live state.
+
+**Why redo needs the wrapped net service everywhere**: redo feeds recorded events into the live game in replay
+mode. With the game's own `NetSingleplayerGameService` (`Type == Singleplayer`) the combat manager would still
+enqueue its own `ReadyToBeginEnemyTurnAction` next to the recorded one (double enemy turn). Hence
+`Patch_RunManager_InitializeShared` wraps the service for every singleplayer run, not only rebuilt ones.
+
+Known gaps of the fast path (all fall back to replay or are cosmetic): decisions made while another action was
+still executing (queued card plays) get no memento; Defect orbs are placed best-effort (not tested); the old
+room's pooled `NCard` nodes are freed with the room instead of returned to the pool (a few entries per undo).
+
 ## Files
 
 ```
 UndoAndRedo/
   UndoAndRedoMod.cs         Entry point, logging, toast, Harmony patches
-  ReplayRecorder.cs         Event/id/open-action tracking, checksums, boundary + segment analysis
-  RewindEngine.cs           Undo/redo orchestration: teardown, rebuild, feed, settle, verify
+  ReplayRecorder.cs         Event/id/open-action tracking, checksums, mementos, boundary + segment analysis
+  RewindEngine.cs           Undo/redo orchestration: fast path dispatch, teardown, rebuild, feed, settle, verify
   RewindNetGameService.cs   Singleplayer net service whose Type switches to Replay while feeding
+  ShadowSnapshot.cs         Research tool: path→value model diff on a worker thread (logs/UndoAndRedo.shadow)
+  FastPath/FastPath.cs      Mode file, capture validity, TryFastUndo, queue detach, shadow trial
+  FastPath/ModelSnapshot.cs In-place memento of an object graph (capture/restore)
+  FastPath/VisualRebuild.cs Fresh combat room + hand/intents/orbs/potions/top bar from the model
+  FastPath/ScreenCover.cs   Freeze-frame cover used by the fast path
   SelfTest.cs               Automated end-to-end test (only runs when logs/UndoAndRedo.selftest exists)
   UndoAndRedo.json          Mod manifest (DLL only, no PCK needed on 0.107+)
 ```
@@ -100,7 +164,8 @@ UndoAndRedo/
 |---|---|---|
 | `NGame._Input` | prefix | Left/Right arrow → undo/redo |
 | `CombatReplayWriter.WriteReplay` | prefix | Skip the replay disk write during our own teardown |
-| `NHandCardHolder.AnimPosition/AnimAngle/AnimScale` | prefix | Move hand cards instantly while replaying. Their per-frame `Lerp(target, delta*k)` has no weight clamp and diverges to infinity under any time scale > 1 (that was the "flashing screen" bug: a card frame stretched across the whole screen) |
+| `NHandCardHolder.AnimPosition/AnimAngle/AnimScale` | prefix | Move hand cards instantly while replaying or while the fast path rebuilds the hand. Their per-frame `Lerp(target, delta*k)` has no weight clamp and diverges to infinity under any time scale > 1 (that was the "flashing screen" bug: a card frame stretched across the whole screen) |
+| `RunManager.InitializeShared` | prefix | Wrap the game's singleplayer net service in `RewindNetGameService` for every run (see Fast path) |
 | `PreloadManager.LoadRoomCombatAssets` | prefix | Skip the room asset preload (already resident) during replay |
 | `NTransition.RoomFadeIn` | prefix | Suppress the game's fade-in while we rebuild behind a black screen |
 | `RunManager.Launch` | postfix | Attach the recorder to the new run's queue/executor/writer |
@@ -109,7 +174,13 @@ UndoAndRedo/
 
 ### Reflection (private members we touch)
 
-* `CombatReplayWriter._replay` (read only) — the live `CombatReplay`.
+* `CombatReplayWriter._replay` — the live `CombatReplay` (read; the fast path truncates its `events`).
+* Fast path: `ActionQueueSet._actionQueues` / `ActionQueue.actions` / `_actionsWaitingForResumption` /
+  `_nextId`, `ActionExecutor.CurrentlyRunningAction` (setter), `NRun._roomContainer`, `NCombatRoom.OnCombatSetUp`,
+  `NCombatUi._state`, `NEndTurnButton.OnTurnStarted`, `CombatStateTracker.NotifyCombatStateChanged`,
+  `NPotionContainer._holders`, `NOrbManager._orbs` / `OnCombatSetup`, `NRelicInventoryHolder.RefreshAmount` /
+  `RefreshStatus`, `NTopBarHp.UpdateHealth`, `NTopBarGold.UpdateGold`, `NHandCardHolder._targetPosition`.
+  Startup logs a "FastPath reflection:" line naming any missing member.
 * `RunManager.State` setter, `RunManager.InitializeShared` / `InitializeRunLobby` / `InitializeSavedRun` —
   equivalent of the public `SetUpSavedSingleplayer`, but with our own net service and without bumping the
   save file's reload counter. `InitializeShared` parameters are bound by name so added parameters do not
@@ -123,7 +194,8 @@ UndoAndRedo/
   plus manual room-stack reconstruction (`EnterRoomInternal(event, isRestoringRoomStackBase)` +
   `EnterRoomWithoutExitingCurrentRoom(combat)`).
 * Singleplayer only. Multiplayer would need all peers to rewind together.
-* A rewind costs a full room rebuild (~0.4 s, plus ~0.12 s per earlier turn replayed). Undo depth is unbounded within a combat.
+* A replay-path rewind costs a full room rebuild (~0.4 s, plus ~0.12 s per earlier turn replayed); the fast
+  path costs ~0.1 s regardless of depth. Undo depth is unbounded within a combat.
 * Cosmetic: enemy screen positions are re-randomised on rebuild; the engine restores the previous
   positions by combat id. Music keeps playing through the rebuild because `NonInteractiveMode` suppresses the
   music controller.
@@ -131,12 +203,24 @@ UndoAndRedo/
 ## Self-test
 
 Create an empty file `<user data>/logs/UndoAndRedo.selftest` (user data is `%APPDATA%\SlayTheSpire2`) and
-start the game with a save that is entering a fight. The mod continues the run, plays up to 3 cards per turn
-for 3 turns through the real action path, undoes everything step by step, redoes everything, compares
-checksums, writes `SELFTEST RESULT: PASS|FAIL` to `logs/UndoAndRedo.log` and quits. Back up the profile's
-saves first; the run's reload counter is not touched but the fight is played.
+start the game. With a saved run the mod continues it (travelling to the next monster node if needed); without
+one it starts an unsaved Ironclad run (seed from `logs/UndoAndRedo.selftest.seed`, default `UNDOTEST`). It
+plays up to 3 cards per turn for N turns (`logs/UndoAndRedo.selftest.turns`, default 8; use 2–3 for the
+starter deck or the fight ends early) through the real action path, undoes everything step by step, redoes
+everything, undoes once more, plays one card live and undoes that, compares checksums after every step, checks
+that the screen matches the model (hand cards and order, living creatures, potions), saves a screenshot per
+step to `logs/selftest/`, writes `SELFTEST RESULT: PASS|FAIL` to `logs/UndoAndRedo.log` and quits. Back up
+the profile's saves first when testing on a saved run.
 
 ## Test status (2026-09-14, v0.107.1)
+
+Fast path (`fastpath` = `on`), unsaved Ironclad run, 2 turns / 8 decisions: 8 fast undos at 115–118 ms each
+(restore + checksum 25 ms, room rebuild 10 ms, the rest is the 5-frame visual settle), 8 redos at 100–200 ms,
+final undo and undo-after-live-play at ~90–107 ms, all checksums equal to the recorded ones, screen consistent
+with the model at every step, PASS. Shadow mode earlier: 8/8 trial restores reproduced the expected checksum
+with zero field differences in the model diff.
+
+Replay path (unchanged):
 
 Self-test passed nine times (clean, and with BaseLib / QuickRestart / Loadout / JmcModLib / BonModConfig /
 BetterSaveSlots / BetterSpire2 / intentgraph2 loaded): 12 player decisions across 3 turns (and 32 across 8 turns) undone one by one
