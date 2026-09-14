@@ -267,6 +267,9 @@ internal sealed class ReplayRecorder
         try
         {
             if (!_combat.IsInProgress || !IsPlayerDecision(action)) return;
+            // BeforeActionExecuted also fires when an action resumes after a player choice; only the
+            // first start reflects the state "before" the decision.
+            if (action.State != GameActionState.WaitingForExecution) return;
             var tracked = _tracked.Values.FirstOrDefault(t => ReferenceEquals(t.Action, action));
             if (tracked == null) return;
             var state = CurrentState();
