@@ -2,9 +2,10 @@
     "id": "UpgradeAllCards",
     "name": "Upgrade All Cards",
     "author": "JiesiLuo",
-    "description": "Automatically upgrades all starting cards and any new cards added to your deck during a run.",
-    "version": "1.0.0",
-    "has_pck": true,
+    "description": "Start every run with a fully upgraded deck and all three egg relics (Frozen, Molten, Toxic), so every card you see is the upgraded version. Eggs are removed from the relic pool.",
+    "version": "1.1.0",
+    "min_game_version": "0.107.0",
+    "has_pck": false,
     "has_dll": true,
     "dependencies": [],
     "affects_gameplay": true

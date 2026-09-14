@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Steamworks.NET">
+      <HintPath>$(STS2GameDir)/data_sts2_windows_x86_64/Steamworks.NET.dll</HintPath>
+    </Reference>
+    <None Include="$(STS2GameDir)/data_sts2_windows_x86_64/steam_api64.dll" Link="steam_api64.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="steam_appid.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
