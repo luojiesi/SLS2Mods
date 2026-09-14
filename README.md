@@ -78,6 +78,8 @@ Forces the game to use the same save directory regardless of whether mods are lo
 
 ### UpgradeAllCards
 
+Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3801790594 (subscribe on any device, including Steam Deck). Update it with `tools/WorkshopUploader` (`update --item 3801790594 ...`).
+
 Automatically grants all three egg relics (Frozen Egg, Molten Egg, Toxic Egg) at the start of every run, upgrades the starting deck, and removes the eggs from the relic pool so they won't appear again mid-run.
 
 **How it works:**
