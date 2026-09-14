@@ -37,7 +37,24 @@ internal static class ShadowSnapshot
     {
         "_logger", "_random", "_cts", "_combatCts", "_completionSource", "_executionTask",
         "_pauseForPlayerChoiceTaskSource", "_executeAfterResumptionTaskSource",
+        // back-references and immutable shared data: identity noise, no state
+        "_owner", "_pool", "_tags", "_titleLocString", "_descriptionLocString", "_card", "_runState", "RunState",
+        "_messageBuffer", "_netService", "_players", "_playerCollection", "_hookActions", "_subscriptions",
+        "_stateTracker", "StateTracker", "_canonical", "_cloneOf",
     };
+
+    private static readonly System.Reflection.PropertyInfo? IsMutableProp =
+        HarmonyLib.AccessTools.Property(typeof(MegaCrit.Sts2.Core.Models.AbstractModel), "IsMutable");
+
+    /// <summary>True while live captures are wanted (flag file logs/UndoAndRedo.shadow exists).</summary>
+    public static bool Enabled
+    {
+        get
+        {
+            try { return System.IO.File.Exists(System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.shadow")); }
+            catch { return false; }
+        }
+    }
 
     private static bool IsSkippedType(Type t)
     {
@@ -47,7 +64,10 @@ internal static class ShadowSnapshot
         if (t == typeof(CancellationToken) || typeof(CancellationTokenSource).IsAssignableFrom(t)) return true;
         if (t.FullName != null && (t.FullName.StartsWith("System.Threading") || t.FullName.StartsWith("Godot."))) return true;
         if (typeof(System.Random).IsAssignableFrom(t)) return true;
+        if (typeof(Type).IsAssignableFrom(t) || typeof(MemberInfo).IsAssignableFrom(t)) return true;
         if (t.Name.Contains("Logger")) return true;
+        // Framework objects other than plain collections are never game state (reflection caches, buffers...).
+        if (t.Namespace != null && t.Namespace.StartsWith("System") && !typeof(IEnumerable).IsAssignableFrom(t)) return true;
         return false;
     }
 
@@ -68,10 +88,10 @@ internal static class ShadowSnapshot
             if (rs == null) return null;
             Walk("Run", rs, values, visited, 0);
             Walk("Combat", CombatManager.Instance, values, visited, 0);
-            Walk("CombatCardDb", MegaCrit.Sts2.Core.GameActions.Multiplayer.NetCombatCardDb.Instance, values, visited, 0);
-            Walk("Queue", rm.ActionQueueSet, values, visited, 0);
-            Walk("Choices", rm.PlayerChoiceSynchronizer, values, visited, 0);
-            Walk("Hooks", rm.ActionQueueSynchronizer, values, visited, 0);
+            values["Ids.NextActionId"] = rm.ActionQueueSet.NextActionId.ToString();
+            values["Ids.NextHookId"] = rm.ActionQueueSynchronizer.NextHookId.ToString();
+            values["Ids.ChoiceIds"] = string.Join(",", rm.PlayerChoiceSynchronizer.ChoiceIds);
+            values["Ids.RewardIds"] = string.Join(",", rm.RewardsSetSynchronizer.GetNextRewardIds());
             sw.Stop();
             return new Snapshot { Values = values, ObjectCount = visited.Count, CaptureMs = sw.Elapsed.TotalMilliseconds, Label = label };
         }
@@ -90,6 +110,11 @@ internal static class ShadowSnapshot
         if (IsLeaf(t)) { values[path] = Convert.ToString(obj, System.Globalization.CultureInfo.InvariantCulture) ?? ""; return; }
         if (IsSkippedType(t)) return;
         if (obj is Rng rng) { values[path] = $"Rng(seed={rng.Seed},counter={rng.Counter})"; return; }
+        if (obj is MegaCrit.Sts2.Core.Models.AbstractModel model && IsMutableProp?.GetValue(model) is false)
+        {
+            values[path] = "(canonical " + model.Id.Entry + ")";
+            return;
+        }
         if (depth > MaxDepth) { values[path] = "(depth)"; return; }
         if (visited.TryGetValue(obj, out var firstPath)) { values[path] = "(ref " + firstPath + ")"; return; }
         visited[obj] = path;
@@ -97,8 +122,14 @@ internal static class ShadowSnapshot
         if (obj is IDictionary dict)
         {
             values[path + ".Count"] = dict.Count.ToString();
+            var seen = new Dictionary<string, int>();
             foreach (DictionaryEntry e in dict)
-                Walk(path + "[" + Convert.ToString(e.Key, System.Globalization.CultureInfo.InvariantCulture) + "]", e.Value, values, visited, depth + 1);
+            {
+                string key = e.Key is MegaCrit.Sts2.Core.Models.AbstractModel km ? km.Id.Entry
+                           : Convert.ToString(e.Key, System.Globalization.CultureInfo.InvariantCulture) ?? "null";
+                if (seen.TryGetValue(key, out var n)) { seen[key] = n + 1; key += "#" + (n + 1); } else seen[key] = 0;
+                Walk(path + "[" + key + "]", e.Value, values, visited, depth + 1);
+            }
             return;
         }
         if (obj is IEnumerable seq && obj is not string)

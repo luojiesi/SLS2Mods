@@ -283,6 +283,7 @@ internal sealed class ReplayRecorder
                 _checksumBefore[tracked.EventIndex] = _checksums.GenerateChecksum(state);
                 _stateBefore[tracked.EventIndex] = state;
             }
+            if (RewindEngine.ReplayModeActive || !ShadowSnapshot.Enabled) return; // research captures only for live decisions
             var shadow = ShadowSnapshot.Capture($"before event {tracked.EventIndex} ({action.GetType().Name})");
             if (shadow != null)
             {

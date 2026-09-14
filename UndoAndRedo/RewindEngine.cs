@@ -197,7 +197,7 @@ internal static class RewindEngine
             var expectedState = rec.StateBefore(target);
             var expectedShadow = rec.ShadowBefore(target);
             uint? liveChecksum = rec.CurrentChecksum();
-            var liveShadow = ShadowSnapshot.Capture("live state at undo time");
+            var liveShadow = ShadowSnapshot.Enabled ? ShadowSnapshot.Capture("live state at undo time") : null;
             Log.Write($"Undo target = {target} ({ReplayRecorder.Describe(events[target])}); keeping {prefix.Count} events, {segments.Count} redo segment(s), expected checksum = {(expected.HasValue ? expected.Value.ToString() : "n/a")}");
 
             var header = CloneHeader(replay);
