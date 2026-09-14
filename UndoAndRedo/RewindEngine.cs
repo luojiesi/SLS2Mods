@@ -540,59 +540,20 @@ internal static class RewindEngine
         int turnStarts = 0;
         Action<CombatState> onTurnStarted = _ => turnStarts++;
         cm.TurnStarted += onTurnStarted;
-        try
+        int i = 0;
+        var fsw = System.Diagnostics.Stopwatch.StartNew();
+
+        // Choices, resumptions and hook actions are consumed by the game whenever it gets to them; they are
+        // delivered as soon as they are next in the stream (also while we are waiting on a game action),
+        // because the game may need them to finish the very thing we are waiting for (e.g. a boss asking the
+        // player to pick a card during the enemy turn). Order is preserved, so action ids stay consistent.
+        void PumpNonActions()
         {
-            int n = 0;
-            var fsw = System.Diagnostics.Stopwatch.StartNew();
-            foreach (var ev in events)
+            while (i < events.Count && events[i].eventType != CombatReplayEventType.GameAction)
             {
-                n++;
-                long evStart = fsw.ElapsedMilliseconds;
+                var ev = events[i];
                 switch (ev.eventType)
                 {
-                    case CombatReplayEventType.GameAction:
-                    {
-                        while (cm.IsInProgress && (cm.EndingPlayerTurnPhaseOne || cm.EndingPlayerTurnPhaseTwo))
-                            await NextFrame();
-                        var player = runState.GetPlayer(ev.playerId!.Value);
-                        var action = ev.action!.ToGameAction(player);
-                        if (action.ActionType == GameActionType.CombatPlayPhaseOnly)
-                        {
-                            while (cm.IsInProgress && (cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Enemy
-                                   || rm.ActionQueueSynchronizer.CombatState != ActionSynchronizerCombatState.PlayPhase))
-                                await NextFrame();
-                        }
-                        if (!cm.IsInProgress) break;
-                        rm.ActionQueueSet.EnqueueWithoutSynchronizing(action);
-                        fed.Add(action);
-
-                        // Never run ahead of the game (the game's own replay loop does, and diverges when an
-                        // action pauses for a player choice): wait for this action to actually start, and for
-                        // turn transitions to complete, before feeding the next event.
-                        if (action is ReadyToBeginEnemyTurnAction)
-                        {
-                            int before = turnStarts;
-                            await WaitUntil(() => !cm.IsInProgress
-                                                  || (turnStarts > before
-                                                      && cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Player
-                                                      && rm.ActionQueueSynchronizer.CombatState == ActionSynchronizerCombatState.PlayPhase
-                                                      && !cm.EndingPlayerTurnPhaseOne && !cm.EndingPlayerTurnPhaseTwo),
-                                            60, $"next player turn after event #{n}");
-                        }
-                        else if (action is EndPlayerTurnAction)
-                        {
-                            await WaitUntil(() => !cm.IsInProgress || IsDone(action), 30, $"end turn event #{n}");
-                        }
-                        else
-                        {
-                            await WaitUntil(() => !cm.IsInProgress
-                                                  || action.State != GameActionState.WaitingForExecution
-                                                  || fed.Any(a => a.State is GameActionState.GatheringPlayerChoice),
-                                            30, $"start of event #{n} {action.GetType().Name}");
-                        }
-                        Log.Write($"    feed #{n} {action.GetType().Name}: {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, state={action.State})");
-                        break;
-                    }
                     case CombatReplayEventType.HookAction:
                     {
                         var hook = rm.ActionQueueSynchronizer.GetHookActionForId(ev.hookId!.Value, ev.playerId!.Value, ev.gameActionType!.Value);
@@ -612,8 +573,74 @@ internal static class RewindEngine
                     default:
                         throw new InvalidOperationException($"Unknown replay event type {ev.eventType}");
                 }
+                i++;
             }
-            Log.Write($"Fed {n} events ({fed.Count} actions)");
+        }
+
+        async Task<bool> WaitPumping(Func<bool> condition, double timeoutSec, string what)
+        {
+            var start = Time.GetTicksMsec();
+            while (true)
+            {
+                PumpNonActions();
+                if (condition()) return true;
+                if (Time.GetTicksMsec() - start > timeoutSec * 1000) { Log.Write($"Timeout waiting for {what}"); return false; }
+                await NextFrame();
+            }
+        }
+
+        try
+        {
+            while (i < events.Count)
+            {
+                PumpNonActions();
+                if (i >= events.Count) break;
+                var ev = events[i];
+                int n = i + 1;
+                long evStart = fsw.ElapsedMilliseconds;
+
+                await WaitPumping(() => !cm.IsInProgress || (!cm.EndingPlayerTurnPhaseOne && !cm.EndingPlayerTurnPhaseTwo), 60, $"turn phases before event #{n}");
+                if (!cm.IsInProgress) break;
+                var player = runState.GetPlayer(ev.playerId!.Value);
+                var action = ev.action!.ToGameAction(player);
+                if (action.ActionType == GameActionType.CombatPlayPhaseOnly)
+                {
+                    await WaitPumping(() => !cm.IsInProgress
+                                            || (cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Player
+                                                && rm.ActionQueueSynchronizer.CombatState == ActionSynchronizerCombatState.PlayPhase),
+                                      60, $"play phase before event #{n}");
+                    if (!cm.IsInProgress) break;
+                }
+                rm.ActionQueueSet.EnqueueWithoutSynchronizing(action);
+                fed.Add(action);
+                i++;
+
+                // Never run ahead of the game: wait for this action to actually start (or for a turn
+                // transition to complete) before feeding the next action.
+                if (action is ReadyToBeginEnemyTurnAction)
+                {
+                    int before = turnStarts;
+                    await WaitPumping(() => !cm.IsInProgress
+                                            || (turnStarts > before
+                                                && cm.DebugOnlyGetState()?.CurrentSide == CombatSide.Player
+                                                && rm.ActionQueueSynchronizer.CombatState == ActionSynchronizerCombatState.PlayPhase
+                                                && !cm.EndingPlayerTurnPhaseOne && !cm.EndingPlayerTurnPhaseTwo),
+                                      60, $"next player turn after event #{n}");
+                }
+                else if (action is EndPlayerTurnAction)
+                {
+                    await WaitPumping(() => !cm.IsInProgress || IsDone(action), 30, $"end turn event #{n}");
+                }
+                else
+                {
+                    await WaitPumping(() => !cm.IsInProgress
+                                            || action.State != GameActionState.WaitingForExecution
+                                            || fed.Any(a => a.State is GameActionState.GatheringPlayerChoice),
+                                      30, $"start of event #{n} {action.GetType().Name}");
+                }
+                Log.Write($"    feed #{n} {action.GetType().Name}: {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, state={action.State})");
+            }
+            Log.Write($"Fed {i} events ({fed.Count} actions)");
         }
         finally
         {
