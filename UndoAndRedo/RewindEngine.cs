@@ -428,11 +428,9 @@ internal static class RewindEngine
                 var actual = rec.CurrentChecksum();
                 if (actual.HasValue && actual.Value != expectedChecksum.Value)
                 {
-                    Log.Write($"WARNING: state checksum mismatch after undo: expected {expectedChecksum.Value}, got {actual.Value}
-EXPECTED STATE
-{expectedState}
-ACTUAL STATE
-{rec.CurrentState()}");
+                    Log.Write("WARNING: state checksum mismatch after undo: expected " + expectedChecksum.Value + ", got " + actual.Value
+                              + System.Environment.NewLine + "EXPECTED STATE" + System.Environment.NewLine + expectedState
+                              + System.Environment.NewLine + "ACTUAL STATE" + System.Environment.NewLine + rec.CurrentState());
                     UndoAndRedoMod.Toast("Undo: state mismatch detected (see log)");
                 }
                 else if (actual.HasValue)
