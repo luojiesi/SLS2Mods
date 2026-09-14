@@ -80,6 +80,7 @@ internal sealed class ReplayRecorder
             }
             Current = new ReplayRecorder(rm);
             Log.Write("Recorder attached");
+            EggDiagnostics.RunOnce();
         }
         catch (Exception ex)
         {
