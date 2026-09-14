@@ -1,268 +1,189 @@
-# UndoAndRedo — STS2 Combat Undo/Redo Mod
+# UndoAndRedo 2.0 — Combat rewind by deterministic replay
 
-Combat undo/redo for Slay the Spire 2. Press **Left Arrow** to undo, **Right Arrow** to redo.
+Press **Left Arrow** to undo the last player decision in combat, **Right Arrow** to redo it.
 
-## Credits
+Targets Slay the Spire 2 **v0.107.1** (Godot 4.5 / .NET 9, HarmonyX). Singleplayer only.
 
-Inspired by [**Undo the Spire**](https://github.com/filippobaroni/undo-the-spire) for Slay the Spire 1, created by **filippobaroni** ([Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3354673683)). The STS1 mod used the Save State Mod (STSStateSaver) under the hood, with significant patches to make save/restore faithful for human play. This STS2 version is a ground-up rewrite for the Godot/.NET architecture but follows the same core concept of full combat state snapshots.
+## Why the rewrite
 
-## Architecture
+Version 1 snapshotted game state field-by-field with reflection (HP, powers, piles, RNG counters, relic
+counters, potions, …) and then tried to patch every Godot node back into a matching visual state. Every game
+object with hidden state (power internals, relic dynamic vars, card-play queue, potion holders, end-turn flags)
+was a separate bug, and multi-turn undo and potions were never reliable.
 
-**Approach:** Direct state snapshots (same idea as the STS1 mod). Before each player action, the entire combat state is snapshotted. On undo, the previous snapshot is restored directly — no replay.
+Version 2 patches **no state at all**. It reuses the machinery the game itself relies on for multiplayer
+lockstep and for its built-in combat replay viewer:
 
-**Why this works in STS2:** The game's combat model layer (`CombatState`, `Creature`, `PlayerCombatState`, `CardModel`, `PowerModel`, etc.) is pure data with no Godot Node references. Visual nodes (NCreature, NCard, NPlayerHand, etc.) are separate and can be refreshed after restoring the model.
+| Game facility | Where | What it gives us |
+|---|---|---|
+| `CombatReplayWriter` | `RunManager.CombatReplayWriter` | Records, for the current map point, a full `SerializableRun` taken at room entry plus **every** event that drives combat: `GameAction` (card play, potion use/discard, end turn, ready-for-enemy-turn), `HookAction` (relic/power prompts), `ResumeAction` (an action continuing after a player choice), `PlayerChoice` (what was picked in any selection screen). |
+| `NMainMenu.RunReplay` | debug menu | The game's own replay player: rebuild the run from the save, re-enter the map point, feed the events back through `ActionQueueSet.EnqueueWithoutSynchronizing` / `ResumeActionWithoutSynchronizing` / `PlayerChoiceSynchronizer.ReceiveReplayChoice`. We mirror this loop exactly. |
+| `NetGameType.Replay` | `INetGameService.Type` | While the service reports `Replay`, synchronizers do not enqueue live requests, selection screens read the recorded choice instead of opening UI, and end-turn bookkeeping actions are taken from the stream. |
+| `NonInteractiveMode` | `NonInteractiveMode.AutoSlayerCheck` | The game's headless bot mode: every `Cmd.Wait`, executor pause, SFX and music call becomes a no-op, so a whole combat replays in a few frames. |
+| `NetFullCombatState` + `ChecksumTracker.GenerateChecksum` | multiplayer desync detection | A hash of all gameplay-relevant combat state (creatures, powers, piles, energy, potions, relics, orbs, all RNG counters). We use it to verify that a rewind reproduced the expected state. |
+
+Determinism is guaranteed by the game: all RNG is seeded and counter-based (`Rng(seed, counter)`), the run save
+carries every counter, and the same event stream fed in the same order produces the same state — that is what
+multiplayer clients depend on.
+
+## How undo works
+
+```
+live game                 recorder (ReplayRecorder)              rewind (RewindEngine)
+─────────────────────     ───────────────────────────────────    ────────────────────────────────────
+CombatReplayWriter        for each recorded event:                Left Arrow
+  events[0..n)              • action id + root event index          1. copy events, pick target index
+  serializableRun           • is the action still open?             2. fade out, RunManager.CleanUp()
+                            • checksum before player decisions      3. RunState.FromSerializable(save)
+                                                                    4. InitializeShared/RunLobby/SavedRun
+                                                                       with RewindNetGameService
+                                                                    5. Launch, NRun.Create, GenerateMap,
+                                                                       fast-forward ids, LoadIntoLatestMapCoord
+                                                                    6. wait for play phase of turn 1
+                                                                    7. feed events[0..target) (Replay mode,
+                                                                       NonInteractive, FastMode=Instant)
+                                                                    8. wait until queue idle + play phase
+                                                                    9. verify event count + checksum
+                                                                   10. exit replay mode, fade in
+```
+
+### Choosing the truncation point
+
+An **undo boundary** is a recorded `GameAction` event whose action is a player decision:
+`PlayCardAction`, `UsePotionAction`, `DiscardPotionGameAction`, `EndPlayerTurnAction`,
+`UndoEndPlayerTurnAction`, `ConsoleCmdGameAction`. Everything after a boundary (choices, resumes, hook
+actions, the enemy turn) is a consequence of it and is undone together with it.
+
+The kept prefix must be **closed**:
+
+* No action that is still open in the live game (queued, executing, or waiting for a choice) may be kept.
+  `ReplayRecorder` tracks every enqueued action and its `GameActionState`.
+* No kept action may depend on a `ResumeAction` that lives in the removed suffix. Because the game can queue
+  card B while card A is still executing, A's choice/resume events can be recorded *after* B. The recorder
+  assigns every event its action id (the queue hands out ids sequentially, and a resume consumes one too),
+  so a `ResumeAction` can be traced to the event that originally enqueued the action ("root"). If truncating
+  before B would orphan A, the target moves back to an earlier boundary.
+
+Undo during the enemy turn or mid-animation is allowed: the rebuild discards the in-flight work, and the
+last boundary is the `EndPlayerTurnAction`, so the end-turn itself is undone.
+
+### Redo
+
+The removed suffix is split into self-contained segments (one per boundary, merged when resumptions spill
+across). Segments are pushed on a redo stack together with the event count they expect to see live. Redo feeds
+one segment through the same replay loop (no rebuild). Any new player action invalidates the stack, detected
+by the live event count no longer matching. A trailing segment containing an unfinished action (undo pressed
+while a choice screen was open) is not redoable.
+
+### Verification
+
+After a rewind the engine checks that the game recorded exactly `target` events during the replay (the replay
+re-records itself through the same writer) and compares `NetFullCombatState` checksums against the one the
+recorder took right before the undone action originally executed. A mismatch is logged and shown as a toast
+but never blocks play.
+
+## Files
 
 ```
 UndoAndRedo/
-  UndoAndRedo.csproj     .NET 9 project referencing sts2.dll, 0Harmony.dll, GodotSharp.dll
-  UndoAndRedoMod.cs       Entry point, undo/redo logic, Harmony patches, visual refresh
-  CombatSnapshot.cs        State capture & restore (all mid-combat state)
-  mod_manifest.json        PCK manifest for Godot resource pack generation
+  UndoAndRedoMod.cs         Entry point, logging, toast, Harmony patches
+  ReplayRecorder.cs         Event/id/open-action tracking, checksums, boundary + segment analysis
+  RewindEngine.cs           Undo/redo orchestration: teardown, rebuild, feed, settle, verify
+  RewindNetGameService.cs   Singleplayer net service whose Type switches to Replay while feeding
+  SelfTest.cs               Automated end-to-end test (only runs when logs/UndoAndRedo.selftest exists)
+  UndoAndRedo.json          Mod manifest (DLL only, no PCK needed on 0.107+)
 ```
 
-## Technology Stack
+### Harmony patches
 
-- **Game:** Slay the Spire 2 (Godot 4.5.1 / C# / .NET 9.0)
-- **Patching:** HarmonyX 2.4.2 (runtime method patching)
-- **Deployment:** `.dll` + `.pck` (Godot resource pack) placed in `<game>/mods/`
-- **Mod entry:** `[ModInitializer("Initialize")]` attribute on static class
+| Target | Kind | Purpose |
+|---|---|---|
+| `NGame._Input` | prefix | Left/Right arrow → undo/redo |
+| `CombatReplayWriter.WriteReplay` | prefix | Skip the replay disk write during our own teardown |
+| `PreloadManager.LoadRoomCombatAssets` | prefix | Skip the room asset preload (already resident) during replay |
+| `NTransition.RoomFadeIn` | prefix | Suppress the game's fade-in while we rebuild behind a black screen |
+| `RunManager.Launch` | postfix | Attach the recorder to the new run's queue/executor/writer |
+| `RunManager.CleanUp` | prefix | Detach recorder, drop redo history (except during our own rebuild) |
+| `NMainMenu._Ready` | postfix | Self-test trigger only |
 
-## Build & Deploy
+### Reflection (private members we touch)
+
+* `CombatReplayWriter._replay` (read only) — the live `CombatReplay`.
+* `RunManager.State` setter, `RunManager.InitializeShared` / `InitializeRunLobby` / `InitializeSavedRun` —
+  equivalent of the public `SetUpSavedSingleplayer`, but with our own net service and without bumping the
+  save file's reload counter. `InitializeShared` parameters are bound by name so added parameters do not
+  break the call. Startup logs a "Reflection:" diagnostic line for every member.
+
+## Limitations
+
+* **Event combats** (fights started from an event, room stack depth > 1) are refused with a toast. The
+  game's replay initial state is taken at the map point, i.e. before the event's choices, so the room stack
+  cannot be rebuilt from it. Supporting this needs a custom initial state taken at `CombatSetUp`
+  plus manual room-stack reconstruction (`EnterRoomInternal(event, isRestoringRoomStackBase)` +
+  `EnterRoomWithoutExitingCurrentRoom(combat)`).
+* Singleplayer only. Multiplayer would need all peers to rewind together.
+* A rewind costs a full room rebuild (~0.4 s, plus ~0.12 s per earlier turn replayed). Undo depth is unbounded within a combat.
+* Cosmetic: enemy screen positions are re-randomised on rebuild; the engine restores the previous
+  positions by combat id. Music keeps playing through the rebuild because `NonInteractiveMode` suppresses the
+  music controller.
+
+## Self-test
+
+Create an empty file `<user data>/logs/UndoAndRedo.selftest` (user data is `%APPDATA%\SlayTheSpire2`) and
+start the game with a save that is entering a fight. The mod continues the run, plays up to 3 cards per turn
+for 3 turns through the real action path, undoes everything step by step, redoes everything, compares
+checksums, writes `SELFTEST RESULT: PASS|FAIL` to `logs/UndoAndRedo.log` and quits. Back up the profile's
+saves first; the run's reload counter is not touched but the fight is played.
+
+## Test status (2026-09-14, v0.107.1)
+
+Self-test passed nine times (clean, and with BaseLib / QuickRestart / Loadout / JmcModLib / BonModConfig /
+BetterSaveSlots / BetterSpire2 / intentgraph2 loaded): 12 player decisions across 3 turns (and 32 across 8 turns) undone one by one
+and redone one by one, every step checksum-verified, final checksum equal to the pre-undo one. Not yet
+exercised by the automated test: potions, card-selection prompts, event combats.
+
+### Performance
+
+Measured on an 8-turn fight (32 player decisions) after the speed work:
+
+| Operation | Time |
+|---|---|
+| Undo within turn 1 (nothing to replay) | ~260 ms |
+| Undo at turn 4 (3 turns replayed) | ~650 ms |
+| Undo at turn 8 (7 turns replayed) | ~1.2 s |
+| Redo of one decision | 10–100 ms |
+
+What the speed work does while replaying (all restored afterwards): `RenderingServer.RenderLoopEnabled = false`
+(logic keeps running, nothing is drawn, the window keeps showing the last frame — so no fade or screenshot is
+needed), vsync off and fps cap lifted, `Engine.TimeScale` = 50 so tween/timer waits collapse, the game's
+asset preloads (each ends in a full `GC.Collect`) and the replay disk write are skipped during the rebuild.
+
+Remaining cost is real CPU work, not waiting: ~260 ms fixed (`NRun.Create` ~90 ms, combat start and first hand
+draw ~100 ms, teardown/launch/map ~70 ms) plus ~120 ms per replayed turn, almost all of it the game
+instantiating card/banner nodes and running hooks and checksums at turn transitions. Idle frames cost under
+1 ms; the turn-transition frames cost 10–17 ms each. Going lower would mean suppressing the game's own UI
+construction during replay or keeping the `NRun` scene alive across the rewind, both of which give up the
+"the game builds its own state and visuals" guarantee.
+
+Do not try to speed up physics (`Engine.PhysicsTicksPerSecond` = 1 crashed the engine with unbounded memory
+growth); physics is left untouched.
+
+## Build & deploy
 
 ```bash
-# Build
-cd UndoTheSpire
-"C:/Users/Jiesi Luo/.dotnet9/dotnet" build UndoAndRedo.csproj -c Release \
+"C:/Users/Jiesi Luo/.dotnet9/dotnet" build UndoAndRedo/UndoAndRedo.csproj -c Release \
   '-p:STS2GameDir=D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2'
-
-# Generate PCK (from parent directory)
-cd ..
-python create_pck.py UndoAndRedo/mod_manifest.json \
-  "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/UndoAndRedo.pck"
-
-# Deploy DLL (game must be closed)
-cp UndoAndRedo/bin/Release/net9.0/UndoAndRedo.dll \
-  "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/UndoAndRedo.dll"
+cp UndoAndRedo/bin/Release/net9.0/UndoAndRedo.dll UndoAndRedo/UndoAndRedo.json \
+  "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/mods/"
 ```
 
-## How It Works
+## Maintenance
 
-### Snapshot Lifecycle
+When a game update breaks things, check `logs/UndoAndRedo.log` first: the "Reflection:" lines at startup name
+any missing member, and every rewind logs the event dump, the chosen target, settle diagnostics and the
+checksum result. The replay loop in `RewindEngine.FeedEvents` should be kept identical to the game's
+`NMainMenu.RunReplay`; diff it after each update. Decompile with:
 
-1. **TakeSnapshot()** — called by Harmony prefix patches before player actions
-2. Pushes a `CombatSnapshot` onto `UndoStack`, clears `RedoStack`
-3. **Undo()** — Left Arrow pressed while action queue is idle
-   - Captures current state → pushes to `RedoStack`
-   - Pops previous snapshot from `UndoStack`
-   - Sets `IsRestoring = true` (prevents recursive snapshots)
-   - Calls `snapshot.Restore()` to write all state back
-   - Calls `RefreshAllVisuals()` to sync UI
-4. **Redo()** — same idea, swapping stacks
-
-### What Gets Snapshotted
-
-| State | Game Type | Capture Method | Restore Gotchas |
-|-------|-----------|----------------|-----------------|
-| HP, MaxHP, Block | `Creature._currentHp/MaxHp/_block` | Copy ints via reflection | None |
-| Powers (buffs/debuffs) | `Creature._powers` (List\<PowerModel\>) | Save PowerData (Id, Amount, AmountOnTurnStart, SkipNextDurationTick) | Must rebuild NPowerContainer visuals (see below) |
-| Card piles (hand, draw, discard, exhaust, play) | `CardPile._cards` | Save List\<CardModel\> **references** (not clones) | Preserves NCard visual bindings; mutable card state saved separately |
-| Card mutable state | CardModel fields (cost, keywords, flags) | `MutableClone()` per card, then field-by-field copy back | Skip identity fields (`_cloneOf`, `_owner`, `Id`, etc.) |
-| Energy & Stars | `PlayerCombatState._energy/_stars` | Copy ints | None |
-| Orbs | `OrbQueue._orbs` | `MutableClone()` each | None |
-| Power internal data | `PowerModel._internalData` | `MemberwiseClone()` | Must re-clone at restore time (game mutates the live object; shallow copy shares reference with snapshot) |
-| Pets | `PlayerCombatState._pets` | Save CombatId refs | Lookup existing Creature objects by ID; remove visuals for pets that were alive but should now be dead |
-| Round number & side | `CombatState.RoundNumber/CurrentSide` | Copy | Fire TurnStarted event to refresh end turn button |
-| Monster RNG | `MonsterModel._rng` (Rng) | Save (Seed, Counter), reconstruct with `new Rng(s, c)` | None |
-| Monster move state | `MonsterMoveStateMachine._currentState, _performedFirstMove`, StateLog, MoveState._performedAtLeastOnce | Save state IDs + bools | Use `ForceCurrentState()` and `SetMoveImmediate()` |
-| Monster intent | `MonsterModel.NextMove` | Saved as state ID | Call `nCreature.RefreshIntents()` after restore |
-| Run RNG | `RunRngSet._rngs` (Dict\<RunRngType, Rng\>) | Save all (Seed, Counter) pairs | None |
-| Relics | `RelicModel` | StackCount, IsWax, IsMelted, Status, DynamicVars.Clone() | Some relics may not support DynamicVars cloning |
-| Potions | `Player._potionSlots` | **MutableClone()** each PotionModel | Must clone (game mutates originals); set `_owner` back to player, clear `HasBeenRemovedFromState` |
-| Combat history | `CombatHistory._entries` | Shallow copy list (entries are immutable records) | Needed for per-turn counters (e.g., MementoMori discard count) |
-
-### Harmony Patches
-
-| Patch Target | Type | Purpose |
-|-------------|------|---------|
-| `NGame._Input` | Prefix | Intercept Left/Right Arrow keys for undo/redo |
-| `PlayCardAction` ctor | Prefix | Snapshot before playing a card |
-| `EndPlayerTurnAction` ctor | Prefix | Snapshot before ending turn |
-| `UsePotionAction` ctor | Prefix | Snapshot before using a potion |
-| `DiscardPotionGameAction` ctor | Prefix | Snapshot before discarding a potion |
-| `CombatManager.Reset()` | Postfix | Clear undo/redo stacks when combat ends |
-
-### Guard Conditions
-
-Undo/redo is only allowed when:
-- In combat (`GetCombatState() != null`)
-- It is the player's turn (`cs.CurrentSide == CombatSide.Player`) — undoing during enemy turn leaves the async enemy-turn flow running and corrupts state
-- Not in a screen transition (`NGame.Instance.Transition.InTransition == false`)
-- Action queue is idle (`RunManager.Instance.ActionQueueSet.IsEmpty`)
-- Not already restoring (`IsRestoring == false`)
-
-## Visual Refresh — The Hard Part
-
-Restoring model state is straightforward. Making the UI match is the tricky part because STS2 visuals are event-driven Godot nodes that subscribe to model events. Direct field writes don't fire events.
-
-### Hand Cards (`RefreshHandVisuals`)
-
-Cards in hand are backed by `NCard` Godot nodes managed by `NPlayerHand`. We preserve card **identity** (same CardModel references across snapshots) so existing NCard nodes stay valid.
-
-- Compare restored hand pile to current visual holders
-- Remove NCard nodes for cards no longer in hand (`hand.Remove(card)`)
-- Create NCard nodes for cards newly in hand (`NCard.Create()` + `hand.Add()`)
-- Call `hand.ForceRefreshCardIndices()` to fix ordering
-
-**Animation snapping** (`SnapHandPositions`): After adding/removing cards, NPlayerHand recalculates holder positions with tweened animations. We cancel these and snap to target positions instantly via:
-- Cancel `_positionCancelToken` on each holder
-- Set `Position` to `_targetPosition`
-- Call `SetAngleInstantly()` and `SetScaleInstantly()`
-
-The holder type is lazy-initialized from `hand.ActiveHolders[0].GetType()` since it's an internal type.
-
-### Power Icons (`RefreshPowerVisuals`)
-
-**Problem:** `NPowerContainer` subscribes to `Creature.PowerApplied`/`PowerRemoved` events. It has no rebuild method and `SetCreature()` throws if called twice. When we modify `_powers` directly, no events fire, so icons become stale.
-
-**Solution:** Clear and rebuild.
-1. Navigate scene tree: `NCreature` → `NCreatureStateDisplay._powerContainer` → `NPowerContainer`
-2. Get `_powerNodes` list, `QueueFree()` each NPower node, clear the list
-3. Call private `Add(PowerModel)` method for each power in the creature's restored powers
-
-Key reflection targets:
-- `NCreatureStateDisplay._powerContainer` (FieldInfo)
-- `NPowerContainer._powerNodes` (List\<NPower\>)
-- `NPowerContainer.Add(PowerModel)` (private method, creates NPower.Create + AddChild)
-
-### Potion Visuals (`RefreshPotionVisuals`)
-
-**Problem:** `NPotionContainer` subscribes to `Player.PotionProcured`/`PotionDiscarded`/`UsedPotionRemoved` events. `NPotionHolder` has internal state (`_disabledUntilPotionRemoved`, grayed `Modulate`, etc.) from the use/discard animation flow.
-
-**Solution:** Full holder reset + rebuild.
-1. Find `NPotionContainer` under `NRun.Instance` via recursive type search
-2. For each holder:
-   - Remove all NPotion children and `QueueFree()` them
-   - Reset `<Potion>k__BackingField` to null
-   - Reset `_disabledUntilPotionRemoved` to false
-   - Reset holder `Modulate` and empty icon `Modulate` to `Colors.White`
-3. If slot should have a potion: `NPotion.Create(potionModel)` + `holder.AddPotion(nPotion)`
-
-**Critical:** Potions must be **cloned** during capture (`MutableClone()`), not referenced. The game mutates PotionModel objects when used (sets `HasBeenRemovedFromState`, clears `_owner`). On restore, set `_owner` back to the player.
-
-### Pile Counts (`SyncPileCountDisplays`)
-
-**Problem:** `NCombatCardPile` buttons (draw/discard/exhaust count displays) subscribe to `CardPile.CardAddFinished`/`CardRemoveFinished` events — NOT `ContentsChanged`. So `pile.InvokeContentsChanged()` does nothing for these buttons.
-
-**Solution:** Recursively search `NCombatRoom.Instance` for `NCombatCardPile` nodes and directly set:
-- `_currentCount` field to `pile.Cards.Count`
-- `_countLabel` text via `SetTextAutoSize(count.ToString())`
-
-### End Turn State (`ResetEndTurnState`)
-
-**Problem:** After undo, the end turn button can become unresponsive. Multiple state fields contribute:
-- `CombatManager._playersReadyToEndTurn` — if player is in this set, clicking End Turn dispatches `UndoEndPlayerTurnAction` instead of `EndPlayerTurnAction`
-- `CombatManager.PlayerActionsDisabled` — if true, hand cards are disabled
-- `NPlayerHand._currentCardPlay` — if non-null, `InCardPlay` returns true, `CanTurnBeEnded` returns false
-- `NPlayerHand._currentMode` — if not `Mode.Play`, `CanTurnBeEnded` returns false
-
-**Solution:** `ResetEndTurnState()` clears all of these before other visual refreshes. `PlayerActionsDisabled` is set via property setter to fire `PlayerActionsDisabledChanged` event (NPlayerHand subscribes to re-enable cards).
-
-### Card Descriptions (`RefreshCardDescriptionsDeferred`)
-
-**Problem:** Per-turn counters in card descriptions (e.g., "X damage this turn") show stale values after undo. The card model state is correct but the visual text hasn't been re-rendered. NCards added during `RefreshHandVisuals` may not be `IsNodeReady()` yet when `NotifyCombatStateChanged` fires, causing `UpdateVisuals` to silently return.
-
-**Solution:** Two-pass refresh:
-1. `Callable.From(...).CallDeferred()` to call `UpdateVisuals(PileType.Hand, CardPreviewMode.Normal)` on each NCard in the hand at the end of the current frame, after all nodes are ready.
-2. `RefreshCardVisualsNextFrame` — awaits `SceneTree.ProcessFrame` and calls `UpdateVisuals` again on the next frame. This second pass is needed because power-based cost modifiers (e.g., VoidForm making the first N cards free) depend on `CardModel.CombatState`, which requires the card's `Pile` property to resolve. Pile resolution may not be ready until after the deferred call completes.
-
-### Summoned Creature Visuals (`RemoveCreatureVisual`)
-
-**Problem:** When undoing a card that summoned a pet (e.g., King's Sword via `OstyCmd.Summon`), the creature's visual node persists on screen even though the model state is restored. This happens because:
-1. `NCombatRoom.GetCreatureNode()` only searches `_creatureNodes`, not `_removingCreatureNodes` — a creature mid-removal won't be found.
-2. The creature may transition from alive to dead during restore but no visual cleanup is triggered.
-
-**Solution:** `RemoveCreatureVisual(Creature)` helper:
-1. Try `GetCreatureNode(creature)` first (active creature list).
-2. Fallback: iterate `_removingCreatureNodes` matching by `Entity == creature`.
-3. Hide immediately (`Visible = false`), call `RemoveCreatureNode` (moves to removing list), then `QueueFree()`.
-4. During creature restore, detect alive→dead transitions and call `RemoveCreatureVisual` for each.
-
-### General UI Refresh
-
-- `CombatStateTracker.NotifyCombatStateChanged("UndoAndRedo")` — refreshes energy counter, HP bars, block display
-- `CombatManager.TurnStarted` event delegate — fire with current CombatState to refresh end turn button label
-
-### Monster Intents
-
-Call `nCreature.RefreshIntents()` (async, fire-and-forget) for each monster after restoring move state.
-
-## Key Game Classes Reference
-
-For future maintenance when game updates break things, here are the critical game types and their roles:
-
-### Model Layer (pure data, safe to snapshot)
-- `CombatState` — root combat state (RoundNumber, CurrentSide, Creatures, Allies)
-- `Creature` — HP, block, powers, CombatId; has `.Monster` (MonsterModel) and `.Player` (Player)
-- `PlayerCombatState` — energy, stars, card piles, orb queue, pets
-- `CardModel` — has `MutableClone()`, `CreateClone()`, `ToSerializable()`
-- `PowerModel` — has `MutableClone()` via `AbstractModel`; `AfterCloned()` wipes event subscribers and `_owner`
-- `PotionModel` — has `MutableClone()`; `_owner` field, `HasBeenRemovedFromState` flag
-- `MonsterModel` — `_rng`, `MoveStateMachine`, `NextMove`
-- `RelicModel` — `StackCount`, `IsWax`, `IsMelted`, `Status`, `DynamicVars`
-- `Rng` — just `(Seed, Counter)`, reconstructable via `new Rng(seed, counter)`
-- `OrbModel` — cloneable via `MutableClone()`
-
-### Visual Layer (Godot nodes, need manual refresh)
-- `NPlayerHand` — manages hand card display; `.ActiveHolders`, `.Add()`, `.Remove()`, `.ForceRefreshCardIndices()`
-- `NCard` — visual card node; `NCard.Create(CardModel, ModelVisibility)`
-- `NCombatRoom` — combat scene; `.Instance`, `.GetCreatureNode(creature)`
-- `NCreature` — creature visual; has `NCreatureStateDisplay._stateDisplay`
-- `NCreatureStateDisplay` — holds `NPowerContainer._powerContainer`, `NHealthBar`
-- `NPowerContainer` — subscribes to `Creature.PowerApplied/PowerRemoved`; has private `Add(PowerModel)`; no rebuild method
-- `NPower` — individual power icon; subscribes to `PowerModel.DisplayAmountChanged/Flashed/Removed`
-- `NPotionContainer` — subscribes to player potion events; holds `_holders` list
-- `NPotionHolder` — has `AddPotion()`, `DiscardPotion()`; internal `_disabledUntilPotionRemoved`, `_emptyIcon`
-- `NPotion` — visual potion; `NPotion.Create(PotionModel)`
-- `NCombatCardPile` — pile count button; subscribes to `CardPile.CardAddFinished/CardRemoveFinished`
-
-### Managers
-- `CombatManager` — `.Instance`, `._state` (CombatState), `.History`, `.StateTracker`, `.TurnStarted` event
-- `RunManager` — `.Instance`, `.State` (RunState), `.ActionQueueSet`
-- `CombatStateTracker` — `.NotifyCombatStateChanged(string)` — triggers UI refresh
-
-## Logging
-
-Debug logging writes to `<Godot user data>/logs/UndoAndRedo.log` and `GD.Print` (Godot console). On Windows, the Godot user data directory is typically `%AppData%/Godot/app_userdata/Slay the Spire 2/`. The `logs/` subdirectory is auto-created on first write.
-
-The `Log` class is in `CombatSnapshot.cs`. Diagnostic messages on startup check all reflection fields. Each capture/restore logs key details. The log file is cleared at the start of each session.
-
-To disable logging for release, comment out or remove `Log.Write()` calls.
-
-## Known Issues & Limitations
-
-1. **Pile count display** — `SyncPileCountDisplays` searches recursively under `NCombatRoom.Instance`. If the pile buttons are parented elsewhere (e.g., under `NRun`), they won't be found. Check if `NCombatCardPileType` resolves to non-null at startup.
-2. **No multiplayer support** — single-player only.
-3. **Action queue must be idle** — can't undo mid-animation. This is by design to avoid corrupted state.
-4. **Card identity preservation** — we store CardModel references (not clones) in pile snapshots. This means the same CardModel object must persist across snapshots. If the game ever replaces CardModel objects (rather than mutating them), this approach breaks.
-5. **Power events not reconnected** — after clearing and rebuilding NPowerContainer, the new NPower nodes subscribe to the PowerModel's events. But NCreature also subscribes to each PowerModel's `Flashed` event for VFX. After undo, NCreature may have stale subscriptions to old PowerModel instances (cosmetic-only issue).
-
-## Maintenance Guide
-
-When a game update breaks the mod:
-
-1. **Check reflection fields first.** Run the game with the mod, check ``<Godot user data>/logs/UndoAndRedo.log`` for the "Reflection Cache Diagnostics" block. Any `NULL` entry means a field/property was renamed or removed.
-
-2. **Decompile the game.** Use ILSpy or dotnet-ilspycmd on `<game>/data_sts2_windows_x86_64/sts2.dll`:
-   ```bash
-   dotnet-ilspycmd "D:/Program Files (x86)/Steam/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64/sts2.dll" \
-     -t MegaCrit.Sts2.Core.Entities.Creatures.Creature > Creature.cs
-   ```
-
-3. **Common breakage patterns:**
-   - Field renamed → update the string in `AccessTools.Field(typeof(X), "fieldName")`
-   - Type moved to different namespace → update `AccessTools.TypeByName("full.namespace.TypeName")`
-   - Method signature changed → update `AccessTools.Method()` parameter types
-   - New state added to combat → add capture/restore logic for the new fields
-   - Visual node hierarchy changed → update `FindNodeOfType` search or reflection navigation
-
-4. **Test incrementally.** Each section in `Restore()` is wrapped in try-catch, so one broken area won't crash the whole mod. Check logs for `ERROR in Restore*` messages.
+```bash
+ilspycmd "<game>/data_sts2_windows_x86_64/sts2.dll" -r "<game>/data_sts2_windows_x86_64" > sts2.cs
+```

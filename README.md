@@ -6,10 +6,33 @@ A collection of quality-of-life mods for **Slay the Spire 2** (Godot 4.5.1 / C# 
 
 ### UndoAndRedo
 
-Full combat undo/redo system. Snapshots the entire combat state before each player action and restores it on demand.
+Combat undo/redo by **deterministic replay**. Instead of snapshotting state by hand, the mod reuses the game's own
+combat replay recorder (`CombatReplayWriter`) and replay player: undo rebuilds the run from the save the game
+took when the room was entered and re-feeds every recorded event except the last player decision, in the game's
+non-interactive replay mode. Redo feeds the removed events back in. State checksums (`NetFullCombatState`) verify
+each rewind.
 
 | Key | Action |
 |-----|--------|
+| **Left Arrow** | Undo the last player decision (card play, potion, end turn) |
+| **Right Arrow** | Redo |
+
+**Features:**
+- No hand-written state capture: anything the game can replay in multiplayer, this mod can undo
+- Works across turns (undoing an end-turn rewinds the whole enemy turn), with potions, with card-selection prompts
+- Can be pressed mid-animation or during the enemy turn
+- Unbounded undo depth within a combat; redo stack invalidated by any new action
+- Verifies event count and state checksum after every rewind, logs to `%APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log`
+- Built-in end-to-end self-test (see documentation)
+
+**Limitations:**
+- Singleplayer only
+- Not available in fights started from an event (room stack depth > 1)
+- Each rewind rebuilds the room (~0.26 s, plus ~0.12 s per earlier turn replayed: ~1.2 s at turn 8)
+
+See [UndoAndRedo/DOCUMENTATION.md](UndoAndRedo/DOCUMENTATION.md) for the design.
+
+-----|--------|
 | **Left Arrow** | Undo |
 | **Right Arrow** | Redo |
 
@@ -107,11 +130,13 @@ To create a `.pck` file for code-only mods, use PCK Explorer or `create_pck.py` 
 ```
 STS2Mods/
   UndoAndRedo/          Combat undo/redo (Left/Right Arrow)
-    UndoAndRedoMod.cs     Entry point, input handling, visual refresh
-    CombatSnapshot.cs     State capture & restore
-    UndoAndRedo.json      External manifest (0.99+)
-    mod_manifest.json     Internal manifest (inside .pck)
-    DOCUMENTATION.md      Full technical documentation
+    UndoAndRedoMod.cs       Entry point, input handling, Harmony patches
+    ReplayRecorder.cs       Tracks the game's replay event stream, action ids, checksums
+    RewindEngine.cs         Rebuild + replay orchestration (undo/redo)
+    RewindNetGameService.cs Net service that reports Replay while feeding events
+    SelfTest.cs             Automated end-to-end test
+    UndoAndRedo.json        Manifest (DLL only)
+    DOCUMENTATION.md        Design documentation
   QuickRestart/         Quick restart (F5)
     QuickRestartMod.cs    Entry point, restart logic
     QuickRestart.json     External manifest (0.99+)
