@@ -168,15 +168,19 @@ internal static class ShadowSnapshot
             try
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var diffs = new List<string>();
+                var changedLines = new List<string>();
+                var missingLines = new List<string>();
+                var extraLines = new List<string>();
                 int onlyExpected = 0, onlyActual = 0, changed = 0;
                 foreach (var kv in expected.Values)
                 {
-                    if (!actual.Values.TryGetValue(kv.Key, out var av)) { onlyExpected++; if (diffs.Count < 300) diffs.Add($"  - {kv.Key} = {Trim(kv.Value)}"); }
-                    else if (av != kv.Value) { changed++; if (diffs.Count < 300) diffs.Add($"  ~ {kv.Key}: {Trim(kv.Value)} -> {Trim(av)}"); }
+                    if (!actual.Values.TryGetValue(kv.Key, out var av)) { onlyExpected++; if (missingLines.Count < 120) missingLines.Add($"  - {kv.Key} = {Trim(kv.Value)}"); }
+                    else if (av != kv.Value) { changed++; if (changedLines.Count < 200) changedLines.Add($"  ~ {kv.Key}: {Trim(kv.Value)} -> {Trim(av)}"); }
                 }
                 foreach (var kv in actual.Values)
-                    if (!expected.Values.ContainsKey(kv.Key)) { onlyActual++; if (diffs.Count < 300) diffs.Add($"  + {kv.Key} = {Trim(kv.Value)}"); }
+                    if (!expected.Values.ContainsKey(kv.Key)) { onlyActual++; if (extraLines.Count < 120) extraLines.Add($"  + {kv.Key} = {Trim(kv.Value)}"); }
+                var diffs = new List<string>();
+                diffs.AddRange(changedLines); diffs.AddRange(extraLines); diffs.AddRange(missingLines);
                 sw.Stop();
                 var sb = new StringBuilder();
                 sb.AppendLine($"[{DateTime.Now:HH:mm:ss.fff}] === SHADOW DIFF {context} ===");

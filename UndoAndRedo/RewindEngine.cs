@@ -47,7 +47,7 @@ internal static class RewindEngine
     /// <summary>Engine.TimeScale while replaying: makes tweens/timers finish in one frame.</summary>
     private const double ReplayTimeScale = 25.0; // safe: hand card motion is snapped by Patch_NHandCardHolder_SnapWhileReplaying
     /// <summary>Disable vsync / fps cap while replaying so per-frame awaits run as fast as the GPU allows.</summary>
-    private const bool UncapFrameRateDuringReplay = true;
+    private const bool UncapFrameRateDuringReplay = false; // measured: replay frames are CPU-bound (~25 ms), vsync is not the limit
     /// <summary>
     /// Stop the render loop while replaying: engine logic keeps running but nothing is drawn, so frame-bound
     /// waits take a fraction of a millisecond and the window simply keeps showing the last frame.
