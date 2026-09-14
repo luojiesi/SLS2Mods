@@ -731,6 +731,8 @@ internal static class RewindEngine
         EnsureNonInteractiveHook();
         ReplayModeActive = true;
         SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
+        // Node-level sound effects still fire during the replay (dozens within a few hundred ms); silence SFX.
+        try { NGame.Instance?.AudioManager?.SetSfxVol(0f); } catch (Exception ex) { Log.Write($"mute failed: {ex.Message}"); }
         try
         {
             _savedTimeScale = Engine.TimeScale;
@@ -753,6 +755,7 @@ internal static class RewindEngine
     {
         ReplayModeActive = false;
         SaveManager.Instance.PrefsSave.FastMode = restoreFastMode;
+        TaskHelper.RunSafely(RestoreSfxVolumeSoon());
         try
         {
             if (DisableRenderLoopDuringReplay)
@@ -938,6 +941,19 @@ internal static class RewindEngine
             return;
         }
         await NGame.Instance!.Transition.FadeIn(FadeSeconds);
+    }
+
+    /// <summary>Restore SFX volume a moment after replay so one-shots started during it stay inaudible.</summary>
+    private static async Task RestoreSfxVolumeSoon()
+    {
+        try
+        {
+            var t0 = Time.GetTicksMsec();
+            while (Time.GetTicksMsec() - t0 < 400) await NextFrame();
+            if (!ReplayModeActive)
+                NGame.Instance?.AudioManager?.SetSfxVol(SaveManager.Instance.SettingsSave.VolumeSfx);
+        }
+        catch (Exception ex) { Log.Write($"unmute failed: {ex.Message}"); }
     }
 
     /// <summary>
