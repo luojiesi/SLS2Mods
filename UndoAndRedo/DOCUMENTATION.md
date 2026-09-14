@@ -100,6 +100,7 @@ UndoAndRedo/
 |---|---|---|
 | `NGame._Input` | prefix | Left/Right arrow → undo/redo |
 | `CombatReplayWriter.WriteReplay` | prefix | Skip the replay disk write during our own teardown |
+| `NHandCardHolder.AnimPosition/AnimAngle/AnimScale` | prefix | Move hand cards instantly while replaying. Their per-frame `Lerp(target, delta*k)` has no weight clamp and diverges to infinity under any time scale > 1 (that was the "flashing screen" bug: a card frame stretched across the whole screen) |
 | `PreloadManager.LoadRoomCombatAssets` | prefix | Skip the room asset preload (already resident) during replay |
 | `NTransition.RoomFadeIn` | prefix | Suppress the game's fade-in while we rebuild behind a black screen |
 | `RunManager.Launch` | postfix | Attach the recorder to the new run's queue/executor/writer |
@@ -153,10 +154,16 @@ Measured on an 8-turn fight (32 player decisions) after the speed work:
 | Undo at turn 8 (7 turns replayed) | ~1.2 s |
 | Redo of one decision | 10–100 ms |
 
-What the speed work does while replaying (all restored afterwards): `RenderingServer.RenderLoopEnabled = false`
-(logic keeps running, nothing is drawn, the window keeps showing the last frame — so no fade or screenshot is
-needed), vsync off and fps cap lifted, `Engine.TimeScale` = 50 so tween/timer waits collapse, the game's
-asset preloads (each ends in a full `GC.Collect`) and the replay disk write are skipped during the rebuild.
+What the speed work does while replaying (all restored afterwards): a frozen copy of the last frame is drawn on a
+top CanvasLayer (no fade to black), `Engine.TimeScale` = 25 so tween/timer waits collapse, hand card holders are
+snapped to their targets (see patches), the game's asset preloads (each ends in a full `GC.Collect`) and the
+replay disk write are skipped during the rebuild. Before uncovering, the engine waits until the hand shows every
+card of the model within 2 px of its target. Measured in play on v0.107.1: undo 400–510 ms (elite fights, turn 1),
+redo 85–120 ms.
+
+Things that were tried and reverted: stopping the render loop (`RenderingServer.RenderLoopEnabled`, flickers on
+some setups), toggling vsync, `Engine.PhysicsTicksPerSecond` = 1 (crashes the engine), the game's
+`NFullscreenTextVfx` as a toast (it is a full-screen flash), and suppressing `NTransition.RoomFadeIn` (not needed).
 
 Remaining cost is real CPU work, not waiting: ~260 ms fixed (`NRun.Create` ~90 ms, combat start and first hand
 draw ~100 ms, teardown/launch/map ~70 ms) plus ~120 ms per replayed turn, almost all of it the game

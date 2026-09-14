@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Rooms;
@@ -44,14 +45,14 @@ internal static class RewindEngine
     /// <summary>Hide the rebuild behind a frozen copy of the last frame instead of a fade to black.</summary>
     private const bool UseFreezeFrame = true;
     /// <summary>Engine.TimeScale while replaying: makes tweens/timers finish in one frame.</summary>
-    private const double ReplayTimeScale = 50.0;
+    private const double ReplayTimeScale = 25.0; // safe: hand card motion is snapped by Patch_NHandCardHolder_SnapWhileReplaying
     /// <summary>Disable vsync / fps cap while replaying so per-frame awaits run as fast as the GPU allows.</summary>
-    private const bool UncapFrameRateDuringReplay = true;
+    private const bool UncapFrameRateDuringReplay = false;
     /// <summary>
     /// Stop the render loop while replaying: engine logic keeps running but nothing is drawn, so frame-bound
     /// waits take a fraction of a millisecond and the window simply keeps showing the last frame.
     /// </summary>
-    private const bool DisableRenderLoopDuringReplay = true;
+    private const bool DisableRenderLoopDuringReplay = false;
     private const double CombatStartTimeoutSec = 20.0;
     private const double ReplaySettleTimeoutSec = 30.0;
     private const int SettleStableFrames = 2;
@@ -268,6 +269,7 @@ internal static class RewindEngine
                 EnterReplayMode();
                 var fed = await FeedEvents(entry.Segment, runState);
                 ok = await WaitForSettle(fed);
+                await WaitForVisuals(runState);
             }
             finally
             {
@@ -404,6 +406,8 @@ internal static class RewindEngine
             Log.Write($"{T()} events fed");
             ok = await WaitForSettle(fed);
             Log.Write($"{T()} settled");
+            await WaitForVisuals(runState);
+            Log.Write($"{T()} visuals ready");
             }
             finally
             {
@@ -560,6 +564,57 @@ internal static class RewindEngine
         return fed;
     }
 
+    /// <summary>
+    /// The model settles long before the visuals do: the hand deal, creature intros and background fade of the
+    /// last replayed turn are still animating. Keep replay mode (time scale x50, screen covered) until the hand
+    /// shows every card, then give tweens a few seconds of scaled time to finish.
+    /// </summary>
+    private static readonly FieldInfo? HolderTargetPosField = AccessTools.Field(typeof(MegaCrit.Sts2.Core.Nodes.Cards.Holders.NHandCardHolder), "_targetPosition");
+
+    private static async Task WaitForVisuals(RunState runState)
+    {
+        try
+        {
+            var player = runState.Players[0];
+            var start = Time.GetTicksMsec();
+            int stable = 0;
+            string last = "";
+            while (Time.GetTicksMsec() - start < 2500)
+            {
+                var hand = NPlayerHand.Instance;
+                int model = player.PlayerCombatState?.Hand.Cards.Count ?? 0;
+                var holders = hand?.ActiveHolders;
+                bool countOk = holders != null && holders.Count >= model;
+                bool inPlace = countOk;
+                float maxDist = 0f;
+                if (countOk && HolderTargetPosField != null)
+                {
+                    foreach (var h in holders!)
+                    {
+                        if (HolderTargetPosField.GetValue(h) is Vector2 target)
+                        {
+                            float d = (h.Position - target).Length();
+                            if (!float.IsFinite(d) || d > 2f) inPlace = false;
+                            maxDist = Math.Max(maxDist, float.IsFinite(d) ? d : float.MaxValue);
+                        }
+                    }
+                }
+                string now = $"holders={holders?.Count} model={model} inPlace={inPlace} maxDist={maxDist:F1}";
+                if (now != last) { Log.Write("visuals: " + now); last = now; }
+                if (inPlace && ++stable >= 3) break;
+                if (!inPlace) stable = 0;
+                await NextFrame();
+            }
+            if (HolderTargetPosField == null)
+            {
+                // No way to check card motion; give tweens a moment of scaled time instead.
+                var t0 = Time.GetTicksMsec();
+                while (Time.GetTicksMsec() - t0 < 1000.0 / Math.Max(1.0, ReplayTimeScale)) await NextFrame();
+            }
+        }
+        catch (Exception ex) { Log.Write($"WaitForVisuals error: {ex.Message}"); }
+    }
+
     /// <summary>Waits until the queue is idle, all fed actions are done, and the player is back in the play phase.</summary>
     private static async Task<bool> WaitForSettle(List<GameAction> fed)
     {
@@ -675,6 +730,116 @@ internal static class RewindEngine
         Log.Write("Replay mode OFF");
     }
 
+    // ── debug: per-frame screenshots while covered (enable with logs/UndoAndRedo.capture) ──
+
+    private static bool _capturing;
+    private static int _captureTail = -1;
+    private static int _captureRun;
+
+    private static void StartFrameCapture()
+    {
+        try
+        {
+            var flag = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.capture");
+            if (!System.IO.File.Exists(flag)) return;
+            var dir = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "undo_frames", (++_captureRun).ToString());
+            System.IO.Directory.CreateDirectory(dir);
+            DumpCanvasLayers(dir);
+            _capturing = true;
+            TaskHelper.RunSafely(CaptureLoop(dir));
+        }
+        catch (Exception ex) { Log.Write($"capture start failed: {ex.Message}"); }
+    }
+
+    private static async Task CaptureLoop(string dir)
+    {
+        int n = 0;
+        _captureTail = -1;
+        DumpTransition(dir, "before");
+        while (_capturing && n < 300)
+        {
+            if (_captureTail == 0) { _capturing = false; break; }
+            if (_captureTail == 20) DumpBigControls(dir, "uncover");
+            if (_captureTail == 10) DumpBigControls(dir, "uncover+10");
+            if (_captureTail > 0) _captureTail--;
+            await NextFrame();
+            try
+            {
+                var game = NGame.Instance; if (game == null) break;
+                var img = game.GetViewport().GetTexture().GetImage();
+                img.Resize(640, 360);
+                img.SavePng(System.IO.Path.Combine(dir, $"f{n:000}_{Time.GetTicksMsec()}.png"));
+            }
+            catch (Exception ex) { Log.Write($"capture frame failed: {ex.Message}"); }
+            n++;
+        }
+        DumpCanvasLayers(dir, "_after");
+        DumpTransition(dir, "after");
+        DumpBigControls(dir, "end");
+        Log.Write($"capture: {n} frames written to {dir}");
+    }
+
+    /// <summary>Lists every visible CanvasItem covering at least a quarter of the screen (to find stray overlays).</summary>
+    private static void DumpBigControls(string dir, string when)
+    {
+        try
+        {
+            var root = NGame.Instance!.GetTree().Root;
+            var screen = root.GetVisibleRect().Size;
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"== {when} screen={screen}");
+            void Walk(Node node)
+            {
+                if (node is Control c && c.IsVisibleInTree())
+                {
+                    var r = c.GetGlobalRect();
+                    if (r.Size.X * r.Size.Y >= screen.X * screen.Y * 0.25f)
+                    {
+                        string extra = node is ColorRect cr ? $" color={cr.Color}" : node is TextureRect tr ? $" tex={tr.Texture?.ResourcePath}" : "";
+                        sb.AppendLine($"{c.GetPath()} [{node.GetType().Name}] rect={r} z={c.ZIndex} mod={c.Modulate} self={c.SelfModulate} mat={c.Material?.ResourcePath}{extra}");
+                    }
+                }
+                foreach (var child in node.GetChildren()) Walk(child);
+            }
+            Walk(root);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "big_controls.txt"), sb.ToString());
+        }
+        catch (Exception ex) { Log.Write($"big control dump failed: {ex.Message}"); }
+    }
+
+    private static void DumpTransition(string dir, string when)
+    {
+        try
+        {
+            var tr = NGame.Instance!.Transition;
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"{when}: Visible={tr.Visible} InTransition={tr.InTransition} Modulate={tr.Modulate} MouseFilter={tr.MouseFilter}");
+            var mat = tr.Material as ShaderMaterial;
+            sb.AppendLine($"  material={tr.Material?.ResourcePath} threshold={mat?.GetShaderParameter("threshold")}");
+            foreach (var child in tr.GetChildren())
+                if (child is Control c) sb.AppendLine($"  child {c.Name}: visible={c.Visible} modulate={c.Modulate} pos={c.Position}");
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "transition.txt"), sb.ToString());
+        }
+        catch (Exception ex) { Log.Write($"transition dump failed: {ex.Message}"); }
+    }
+
+    private static void DumpCanvasLayers(string dir, string suffix = "")
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            void Walk(Node node, int depth)
+            {
+                if (node is CanvasLayer cl)
+                    sb.AppendLine($"{new string(' ', depth)}{node.GetPath()} layer={cl.Layer} visible={cl.Visible}");
+                foreach (var child in node.GetChildren()) Walk(child, depth + 1);
+            }
+            Walk(NGame.Instance!.GetTree().Root, 0);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, $"canvas_layers{suffix}.txt"), sb.ToString());
+        }
+        catch (Exception ex) { Log.Write($"layer dump failed: {ex.Message}"); }
+    }
+
     // ── screen cover: freeze the last frame while we work underneath ─────────
 
     private static CanvasLayer? _coverLayer;
@@ -705,6 +870,7 @@ internal static class RewindEngine
                     _coverLayer.AddChild(rect);
                     game.AddChild(_coverLayer);
                     _coverShown = true;
+                    StartFrameCapture();
                     await NextFrame();
                     return;
                 }
@@ -724,6 +890,8 @@ internal static class RewindEngine
             return;
         if (_coverShown)
         {
+            await NextFrame();
+            _captureTail = 20;
             _coverShown = false;
             var layer = _coverLayer;
             _coverLayer = null;

@@ -6,7 +6,8 @@ using MegaCrit.Sts2.Core.Entities.Encounters;
 using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Nodes;
-using MegaCrit.Sts2.Core.Nodes.Vfx;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using System.Reflection;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace UndoAndRedo;
@@ -32,8 +33,18 @@ internal static class Log
                     $"[{DateTime.Now:HH:mm:ss.fff}] === Log cleared (new session) ==={System.Environment.NewLine}");
                 _cleared = true;
             }
-            System.IO.File.AppendAllText(LogPath,
-                $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{System.Environment.NewLine}");
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{System.Environment.NewLine}";
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    using var fs = new System.IO.FileStream(LogPath, System.IO.FileMode.Append, System.IO.FileAccess.Write, System.IO.FileShare.ReadWrite);
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(line);
+                    fs.Write(bytes, 0, bytes.Length);
+                    break;
+                }
+                catch (System.IO.IOException) { System.Threading.Thread.Sleep(5); }
+            }
             GD.Print($"[UndoAndRedo] {msg}");
         }
         catch { }
@@ -65,14 +76,36 @@ public static class UndoAndRedoMod
         Log.Write("Harmony patches applied");
     }
 
-    /// <summary>Shows a short full-screen text flash (same widget the game uses for debug toggles).</summary>
+    /// <summary>Small, quiet toast at the top of the screen (no full-screen flash, no sound).</summary>
     public static void Toast(string text)
     {
         try
         {
-            var node = NFullscreenTextVfx.Create(text);
-            if (node != null)
-                NGame.Instance?.AddChildSafely(node);
+            var game = NGame.Instance;
+            if (game == null) return;
+            var layer = new CanvasLayer { Layer = 110 };
+            var label = new Label
+            {
+                Text = text,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            label.AddThemeFontSizeOverride("font_size", 28);
+            label.AddThemeColorOverride("font_color", new Color(1f, 1f, 1f, 0.95f));
+            label.AddThemeColorOverride("font_outline_color", new Color(0f, 0f, 0f, 0.9f));
+            label.AddThemeConstantOverride("outline_size", 6);
+            label.SetAnchorsPreset(Control.LayoutPreset.CenterTop);
+            label.OffsetTop = 40;
+            label.OffsetLeft = -400;
+            label.OffsetRight = 400;
+            label.OffsetBottom = 90;
+            layer.AddChild(label);
+            game.AddChild(layer);
+            var tween = label.CreateTween();
+            tween.TweenInterval(1.0);
+            tween.TweenProperty(label, "modulate:a", 0f, 0.5);
+            tween.TweenCallback(Callable.From(() => { if (GodotObject.IsInstanceValid(layer)) layer.QueueFree(); }));
         }
         catch (Exception ex)
         {
@@ -104,23 +137,6 @@ internal static class Patch_NGame_Input
                 RewindEngine.RequestRedo();
                 break;
         }
-    }
-}
-
-/// <summary>
-/// While we rebuild the combat behind a black screen, the game's room entry would fade the screen back in
-/// before the replay has caught up. Suppress that fade; RewindEngine fades in itself when done.
-/// </summary>
-[HarmonyPatch(typeof(NTransition), nameof(NTransition.RoomFadeIn))]
-internal static class Patch_NTransition_RoomFadeIn
-{
-    [HarmonyPrefix]
-    public static bool Prefix(ref Task __result)
-    {
-        if (!RewindEngine.ReplayModeActive)
-            return true;
-        __result = Task.CompletedTask;
-        return false;
     }
 }
 
@@ -174,6 +190,45 @@ internal static class Patch_PreloadManager_LoadRoomCombatAssets
     {
         if (!RewindEngine.ReplayModeActive)
             return true;
+        __result = Task.CompletedTask;
+        return false;
+    }
+}
+
+/// <summary>
+/// Hand card holders move with per-frame Lerp(target, delta * k) loops whose weight is not clamped, so any
+/// time scale above 1 (or a slow frame) makes them diverge to infinity. While replaying, move them instantly.
+/// </summary>
+[HarmonyPatch(typeof(NHandCardHolder))]
+internal static class Patch_NHandCardHolder_SnapWhileReplaying
+{
+    private static readonly FieldInfo? TargetPos = AccessTools.Field(typeof(NHandCardHolder), "_targetPosition");
+    private static readonly FieldInfo? TargetAngle = AccessTools.Field(typeof(NHandCardHolder), "_targetAngle");
+    private static readonly FieldInfo? TargetScale = AccessTools.Field(typeof(NHandCardHolder), "_targetScale");
+
+    [HarmonyPrefix, HarmonyPatch("AnimPosition")]
+    public static bool AnimPosition(NHandCardHolder __instance, ref Task __result)
+    {
+        if (!RewindEngine.ReplayModeActive || TargetPos == null) return true;
+        if (TargetPos.GetValue(__instance) is Vector2 t) __instance.Position = t;
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    [HarmonyPrefix, HarmonyPatch("AnimAngle")]
+    public static bool AnimAngle(NHandCardHolder __instance, ref Task __result)
+    {
+        if (!RewindEngine.ReplayModeActive || TargetAngle == null) return true;
+        if (TargetAngle.GetValue(__instance) is float a) __instance.RotationDegrees = a;
+        __result = Task.CompletedTask;
+        return false;
+    }
+
+    [HarmonyPrefix, HarmonyPatch("AnimScale")]
+    public static bool AnimScale(NHandCardHolder __instance, ref Task __result)
+    {
+        if (!RewindEngine.ReplayModeActive || TargetScale == null) return true;
+        if (TargetScale.GetValue(__instance) is Vector2 sc) __instance.Scale = sc;
         __result = Task.CompletedTask;
         return false;
     }
