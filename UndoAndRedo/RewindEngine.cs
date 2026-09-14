@@ -47,7 +47,7 @@ internal static class RewindEngine
     /// <summary>Engine.TimeScale while replaying: makes tweens/timers finish in one frame.</summary>
     private const double ReplayTimeScale = 25.0; // safe: hand card motion is snapped by Patch_NHandCardHolder_SnapWhileReplaying
     /// <summary>Disable vsync / fps cap while replaying so per-frame awaits run as fast as the GPU allows.</summary>
-    private const bool UncapFrameRateDuringReplay = false;
+    private const bool UncapFrameRateDuringReplay = true;
     /// <summary>
     /// Stop the render loop while replaying: engine logic keeps running but nothing is drawn, so frame-bound
     /// waits take a fraction of a millisecond and the window simply keeps showing the last frame.
@@ -80,6 +80,7 @@ internal static class RewindEngine
         public required int PrefixCount;
         /// <summary>Checksum the state had after this segment originally ran (null if unknown).</summary>
         public uint? ExpectedChecksumAfter;
+        public ShadowSnapshot.Snapshot? ExpectedShadowAfter;
     }
 
     private static readonly List<RedoEntry> _redo = new();
@@ -194,12 +195,19 @@ internal static class RewindEngine
             var segments = rec.SplitRedoSegments(events, target);
             uint? expected = rec.ChecksumBefore(target);
             var expectedState = rec.StateBefore(target);
+            var expectedShadow = rec.ShadowBefore(target);
             uint? liveChecksum = rec.CurrentChecksum();
+            var liveShadow = ShadowSnapshot.Capture("live state at undo time");
             Log.Write($"Undo target = {target} ({ReplayRecorder.Describe(events[target])}); keeping {prefix.Count} events, {segments.Count} redo segment(s), expected checksum = {(expected.HasValue ? expected.Value.ToString() : "n/a")}");
 
             var header = CloneHeader(replay);
 
             var ok = await RebuildAndReplay(header, prefix, expected, expectedState);
+            if (ok && expectedShadow != null)
+            {
+                var actualShadow = ShadowSnapshot.Capture($"after undo to event {target}");
+                if (actualShadow != null) ShadowSnapshot.CompareInBackground(expectedShadow, actualShadow, $"undo -> event {target}");
+            }
 
             // Push redo segments on top of the existing stack so that the earliest one is popped first.
             // (Older entries stay valid: they are only reachable after the newer ones are redone.)
@@ -209,7 +217,8 @@ internal static class RewindEngine
             {
                 int end = prefixCount + seg.Count;
                 uint? after = end < events.Count ? rec.ChecksumBefore(end) : (end == events.Count ? liveChecksum : null);
-                entries.Add(new RedoEntry { Segment = seg, PrefixCount = prefixCount, ExpectedChecksumAfter = after });
+                var afterShadow = end < events.Count ? rec.ShadowBefore(end) : (end == events.Count ? liveShadow : null);
+                entries.Add(new RedoEntry { Segment = seg, PrefixCount = prefixCount, ExpectedChecksumAfter = after, ExpectedShadowAfter = afterShadow });
                 prefixCount = end;
             }
             for (int i = entries.Count - 1; i >= 0; i--) _redo.Add(entries[i]);
@@ -282,6 +291,11 @@ internal static class RewindEngine
             {
                 Log.Write($"WARNING: after redo, recorded events = {replay.events.Count}, expected {entry.PrefixCount + entry.Segment.Count}");
                 ok = false;
+            }
+            if (ok && entry.ExpectedShadowAfter != null)
+            {
+                var actualShadow = ShadowSnapshot.Capture("after redo");
+                if (actualShadow != null) ShadowSnapshot.CompareInBackground(entry.ExpectedShadowAfter, actualShadow, $"redo of {entry.Segment.Count} events");
             }
             if (ok && entry.ExpectedChecksumAfter.HasValue)
             {

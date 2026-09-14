@@ -56,6 +56,7 @@ internal sealed class ReplayRecorder
     private readonly Dictionary<int, TrackedAction> _tracked = new();
     private readonly Dictionary<int, uint> _checksumBefore = new();
     private readonly Dictionary<int, NetFullCombatState> _stateBefore = new();
+    private readonly Dictionary<int, ShadowSnapshot.Snapshot> _shadowBefore = new();
     private CombatReplay? _lastSeenReplay;
 
     public static void VerifyReflection()
@@ -128,6 +129,9 @@ internal sealed class ReplayRecorder
     /// <summary>Full state captured together with <see cref="ChecksumBefore"/> (for diffing on mismatch).</summary>
     public NetFullCombatState? StateBefore(int eventIndex) => _stateBefore.TryGetValue(eventIndex, out var st) ? st : null;
 
+    /// <summary>Reflective model-graph snapshot taken before the decision at <paramref name="eventIndex"/> (research).</summary>
+    public ShadowSnapshot.Snapshot? ShadowBefore(int eventIndex) => _shadowBefore.TryGetValue(eventIndex, out var sh) ? sh : null;
+
     /// <summary>Full live combat state snapshot (same structure the game hashes for desync detection).</summary>
     public NetFullCombatState? CurrentState()
     {
@@ -187,6 +191,7 @@ internal sealed class ReplayRecorder
         _tracked.Clear();
         _checksumBefore.Clear();
         _stateBefore.Clear();
+        _shadowBefore.Clear();
         _lastSeenReplay = Replay;
         Log.Write($"Recorder: tracking reset ({why})");
     }
@@ -277,6 +282,12 @@ internal sealed class ReplayRecorder
             {
                 _checksumBefore[tracked.EventIndex] = _checksums.GenerateChecksum(state);
                 _stateBefore[tracked.EventIndex] = state;
+            }
+            var shadow = ShadowSnapshot.Capture($"before event {tracked.EventIndex} ({action.GetType().Name})");
+            if (shadow != null)
+            {
+                _shadowBefore[tracked.EventIndex] = shadow;
+                Log.Write($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
             }
         }
         catch (Exception ex)
