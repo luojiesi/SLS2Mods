@@ -126,6 +126,33 @@ internal static class SelfTest
             rs = rm.DebugOnlyGetState()!;
             Log.Write($"SELFTEST: arrived, room = {rs.CurrentRoom?.GetType().Name} ({rs.CurrentRoom?.RoomType})");
         }
+        // logs/UndoAndRedo.selftest.event = <EVENT_ID>:<option index>[,<option index>...]: enter that event (like the
+        // "event" console command) and pick the given options in order, the last of which should start a fight.
+        string? eventSpec = null;
+        try { var f = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.selftest.event"); if (System.IO.File.Exists(f)) eventSpec = System.IO.File.ReadAllText(f).Trim(); } catch { }
+        if (!string.IsNullOrEmpty(eventSpec))
+        {
+            var parts = eventSpec.Split(':');
+            var eventId = parts[0].Trim().ToUpperInvariant();
+            var picks = parts.Length > 1 ? parts[1].Split(',').Select(x => int.Parse(x.Trim())).ToList() : new List<int> { 0 };
+            var eventModel = ModelDb.AllEvents.Concat(ModelDb.AllAncients).FirstOrDefault(e => e.Id.Entry == eventId);
+            if (eventModel == null) { Log.Write($"SELFTEST: event {eventId} not found"); return false; }
+            Log.Write($"SELFTEST: entering event {eventId}, options {string.Join(",", picks)}");
+            for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
+            rs.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Unknown, MegaCrit.Sts2.Core.Rooms.RoomType.Event, eventModel.Id);
+            await rm.EnterRoom(new EventRoom(eventModel));
+            foreach (var pick in picks)
+            {
+                if (!await RewindEngine.WaitUntil(() => (MegaCrit.Sts2.Core.Nodes.Rooms.NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > pick, 30, $"event option {pick}")) return false;
+                for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
+                Log.Write($"SELFTEST: choosing event option {pick}");
+                rm.EventSynchronizer.ChooseLocalOption(pick);
+                for (int i = 0; i < 60; i++) await RewindEngine.NextFrame();
+            }
+            if (!await RewindEngine.WaitUntil(() => rm.DebugOnlyGetState()?.CurrentRoom is CombatRoom, 30, "event fight")) return false;
+            rs = rm.DebugOnlyGetState()!;
+            Log.Write($"SELFTEST: in event fight, room = {rs.CurrentRoom?.GetType().Name}, room count {rs.CurrentRoomCount}, parent event {(rs.CurrentRoom as CombatRoom)?.ParentEventId?.Entry}");
+        }
         if (rs.CurrentRoom is not CombatRoom)
         {
             // Travel to the next monster node through the same call the map screen uses.

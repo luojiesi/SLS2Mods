@@ -3,7 +3,7 @@
     "name": "UndoAndRedo",
     "author": "JiesiLuo",
     "description": "Undo/redo combat actions with Left/Right Arrow: card plays, potions and whole turns, any depth. Singleplayer.",
-    "version": "2.1.1",
+    "version": "2.2.0",
     "has_pck": false,
     "has_dll": true,
     "dependencies": [],

@@ -194,11 +194,15 @@ UndoAndRedo/
 
 ## Limitations
 
-* **Event combats** (fights started from an event, room stack depth > 1) are refused with a toast. The
-  game's replay initial state is taken at the map point, i.e. before the event's choices, so the room stack
-  cannot be rebuilt from it. Supporting this needs a custom initial state taken at `CombatSetUp`
-  plus manual room-stack reconstruction (`EnterRoomInternal(event, isRestoringRoomStackBase)` +
-  `EnterRoomWithoutExitingCurrentRoom(combat)`).
+* **Event combats** (fights started from an event, room stack depth > 1) work through the fast path only.
+  The game's replay initial state is taken at the map point, i.e. before the event's choices, so the replay
+  path cannot rebuild the room stack; when no verified memento can be applied the undo is refused with a
+  toast instead of falling back. Both kinds are handled: fights that get their own top-level combat room
+  (e.g. Battleworn Dummy) and combat-layout events whose combat room is embedded in the event layout
+  (Punch-Off, The Architect, The Lantern Key) — there the embedded room is swapped inside the layout.
+* **Other mods that act on the combat state** react to an undo as they would to any state change. Known:
+  SpeedX's "auto end turn when there are no playable cards" ends the turn again right after an end-of-turn
+  is undone (the restored state has no playable cards by definition). Turn that option off to undo end turns.
 * Singleplayer only. Multiplayer would need all peers to rewind together.
 * A replay-path rewind costs a full room rebuild (~0.4 s, plus ~0.12 s per earlier turn replayed); the fast
   path costs ~0.1 s regardless of depth. Undo depth is unbounded within a combat.
@@ -225,7 +229,10 @@ Create an empty file `<user data>/logs/UndoAndRedo.selftest` (user data is `%APP
 start the game. With a saved run the mod continues it (travelling to the next monster node if needed); without
 one, or if `logs/UndoAndRedo.selftest.fresh` exists, it starts an unsaved Ironclad run (seed from
 `logs/UndoAndRedo.selftest.seed`, default `UNDOTEST`). `logs/UndoAndRedo.selftest.encounter` containing an
-encounter id (e.g. `KAISER_CRAB_BOSS`) jumps straight into that fight, like the `fight` console command. It
+encounter id (e.g. `KAISER_CRAB_BOSS`) jumps straight into that fight, like the `fight` console command;
+`logs/UndoAndRedo.selftest.event` containing `EVENT_ID:i[,j...]` (e.g. `PUNCH_OFF:1,0`) enters that event and
+picks the given options in order, the last of which must start a fight. Disable mods that act on their own
+(ModLaunchManager's launcher, SpeedX's auto end turn) in `settings.save` while testing. It
 plays up to 3 cards per turn for N turns (`logs/UndoAndRedo.selftest.turns`, default 8; use 2–3 for the
 starter deck or the fight ends early) through the real action path, undoes everything step by step, redoes
 everything, undoes once more, plays one card live and undoes that, compares checksums after every step, checks
@@ -235,7 +242,8 @@ the profile's saves first when testing on a saved run.
 
 ## Test status (2026-09-14, v0.107.1)
 
-Fast path, five scenarios (starter fights with two seeds, potion use, Kaiser Crab boss), each 8–12 decisions
+Fast path, seven scenarios (starter fights with two seeds, potion use, Kaiser Crab boss, Battleworn Dummy
+event fight, Punch-Off combat-layout event fight), each 8–12 decisions
 undone one by one, redone, undone again after a redo, and undone after live play; every step checksum-verified,
 screen consistent with the model, all PASS. One full real run by the player with no defects. Representative run
 (2 turns / 8 decisions): 8 fast undos at 115–118 ms each

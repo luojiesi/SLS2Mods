@@ -64,6 +64,8 @@ internal static class RewindEngine
 
     private static bool _busy;
     private static bool _ownRebuild;
+    /// <summary>The current fight is nested in an event: replay cannot rebuild it, only the fast path applies.</summary>
+    private static bool _eventCombat;
     /// <summary>True while our own teardown runs; CombatReplayWriter.WriteReplay is skipped (disk write we do not need).</summary>
     public static bool SkipReplayWrite => _ownRebuild;
     private static double _savedTimeScale = 1.0;
@@ -153,11 +155,9 @@ internal static class RewindEngine
         var rs = rm.DebugOnlyGetState();
         if (rs?.CurrentRoom is not CombatRoom room)
             return false;
-        if (rs.CurrentRoomCount != 1 || room.ParentEventId != null)
-        {
-            toast = "Undo: not available in event combats";
-            return false;
-        }
+        // A fight started from an event cannot be rebuilt by the replay path (the replay's save was taken
+        // before the event's choices), so it is undo-able through the snapshot fast path only.
+        _eventCombat = rs.CurrentRoomCount != 1 || room.ParentEventId != null;
         if (ReplayRecorder.Current == null)
         {
             toast = "Undo: recorder not attached";
@@ -233,6 +233,12 @@ internal static class RewindEngine
                 }
             }
 
+            if (!fastDone && _eventCombat)
+            {
+                Log.Write("Undo refused: fight started from an event and no verified snapshot could be applied");
+                UndoAndRedoMod.Toast("Undo: not possible here (event fight, no snapshot)");
+                return false;
+            }
             var ok = fastDone || await RebuildAndReplay(header, prefix, expected, expectedState);
             if (ok && expectedShadow != null)
             {

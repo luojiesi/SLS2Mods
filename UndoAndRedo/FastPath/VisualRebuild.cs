@@ -44,6 +44,8 @@ internal static class VisualRebuild
     private static readonly FieldInfo? UiState = AccessTools.Field(typeof(NCombatUi), "_state");
     private static readonly PropertyInfo? RoomBackground = AccessTools.Property(typeof(NCombatRoom), "Background");
     private static readonly PropertyInfo? RoomBgContainer = AccessTools.Property(typeof(NCombatRoom), "BgContainer");
+    private static readonly FieldInfo? LayoutRoomContainer = AccessTools.Field(typeof(MegaCrit.Sts2.Core.Nodes.Events.NCombatEventLayout), "_combatRoomContainer");
+    private static readonly PropertyInfo? LayoutEmbeddedRoom = AccessTools.Property(typeof(MegaCrit.Sts2.Core.Nodes.Events.NCombatEventLayout), "EmbeddedCombatRoom");
 
     public static string ReflectionReport() =>
         $"OnCombatSetUp={(RoomOnCombatSetUp != null ? "OK" : "NULL")} OnTurnStarted={(EndTurnOnTurnStarted != null ? "OK" : "NULL")} " +
@@ -51,7 +53,8 @@ internal static class VisualRebuild
         $"_orbs={(OrbNodes != null ? "OK" : "NULL")} OrbOnCombatSetup={(OrbOnCombatSetup != null ? "OK" : "NULL")} " +
         $"RefreshAmount={(RelicRefreshAmount != null ? "OK" : "NULL")} _targetPosition={(HolderTargetPos != null ? "OK" : "NULL")} " +
         $"_roomContainer={(RoomContainer != null ? "OK" : "NULL")} NCombatUi._state={(UiState != null ? "OK" : "NULL")} " +
-        $"Background.set={(RoomBackground?.SetMethod != null ? "OK" : "NULL")} BgContainer={(RoomBgContainer != null ? "OK" : "NULL")}";
+        $"Background.set={(RoomBackground?.SetMethod != null ? "OK" : "NULL")} BgContainer={(RoomBgContainer != null ? "OK" : "NULL")} " +
+        $"_combatRoomContainer={(LayoutRoomContainer != null ? "OK" : "NULL")} EmbeddedCombatRoom.set={(LayoutEmbeddedRoom?.SetMethod != null ? "OK" : "NULL")}";
 
     /// <summary>
     /// A combat room whose UI was never activated crashes the game's screen-context update (its combat UI
@@ -100,7 +103,22 @@ internal static class VisualRebuild
         }
         var fresh = NCombatRoom.Create(room, CombatRoomMode.ActiveCombat)
                     ?? throw new InvalidOperationException("NCombatRoom.Create returned null");
-        container.SetCurrentScene(fresh);
+        if (container.CurrentScene is NEventRoom eventRoom && eventRoom.Layout is MegaCrit.Sts2.Core.Nodes.Events.NCombatEventLayout layout)
+        {
+            // Combat-layout event (Punch-Off, The Architect, ...): the combat room lives inside the event layout.
+            // Swap it there; the event room itself stays.
+            if (LayoutRoomContainer?.GetValue(layout) is not Node roomHost || LayoutEmbeddedRoom?.SetMethod == null)
+                throw new InvalidOperationException("event layout internals unavailable");
+            old.GetParent()?.RemoveChild(old);
+            old.QueueFree();
+            LayoutEmbeddedRoom.SetValue(layout, fresh);
+            roomHost.AddChild(fresh);
+            log($"{T()} embedded room swapped inside the event layout");
+        }
+        else
+        {
+            container.SetCurrentScene(fresh);
+        }
         if (keptBackground != null)
         {
             try

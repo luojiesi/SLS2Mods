@@ -35,7 +35,8 @@ Combat undo/redo, two mechanisms kept apart:
 
 **Limitations:**
 - Singleplayer only
-- Not available in fights started from an event (room stack depth > 1)
+- Fights started from an event: fast path only (no replay fallback); refused with a toast if no verified snapshot applies
+- Mods that auto-end the turn (SpeedX) end it again right after an end-of-turn is undone
 - Fast-path undo ~0.1 s; a replay-path undo rebuilds the room (~0.4 s plus ~0.12 s per earlier turn replayed)
 
 See [UndoAndRedo/DOCUMENTATION.md](UndoAndRedo/DOCUMENTATION.md) for the design.
