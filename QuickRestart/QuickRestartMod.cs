@@ -117,8 +117,21 @@ public static class QuickRestartMod
                     var room = runManager.DebugOnlyGetState()?.CurrentRoom;
                     if (room != null)
                     {
-                        capturedRoom = room.ToSerializable();
-                        Log.Write($"Captured current room: type={capturedRoom?.RoomType} modelId={capturedRoom?.EncounterId}");
+                        // Only capture combat and event rooms — these need the serialized
+                        // room to preserve encounter/event identity. RestSite, Shop, Treasure
+                        // recreate identically from the map point type (pass null).
+                        // FromSerializable doesn't handle RestSite/Shop/Treasure and would crash.
+                        var roomType = room.RoomType;
+                        if (roomType == MegaCrit.Sts2.Core.Rooms.RoomType.Monster || roomType == MegaCrit.Sts2.Core.Rooms.RoomType.Elite
+                            || roomType == MegaCrit.Sts2.Core.Rooms.RoomType.Boss || roomType == MegaCrit.Sts2.Core.Rooms.RoomType.Event)
+                        {
+                            capturedRoom = room.ToSerializable();
+                            Log.Write($"Captured current room: type={capturedRoom?.RoomType} modelId={capturedRoom?.EncounterId}");
+                        }
+                        else
+                        {
+                            Log.Write($"Skipping room capture for {roomType} (will recreate from map point)");
+                        }
                     }
                 }
                 catch (Exception ex) { Log.Write($"Room capture error: {ex.Message}"); }
