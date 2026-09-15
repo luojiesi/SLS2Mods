@@ -1,0 +1,24 @@
+Hover over anything with a random effect and see what it will actually do before you commit. The mod runs the game's own random logic on an exact copy of the current RNG stream, so the answer is the real outcome, not a probability.
+
+悬停到任何带随机效果的东西上，就能在做决定之前看到它真正会发生什么：用的是游戏当前随机数流的精确副本，显示的是真实结果，不是概率。
+
+[h2]What it predicts[/h2]
+[list]
+[*] [b]Cards in hand[/b]: the cards a card will generate or offer (Discovery, Infernal Blade, Quasar, Jackpot, Metamorphosis, ...), the card it will pick from your hand or piles (True Grit, Cinder, Thrash, Seeker Strike, Beat Down, Catastrophe, ...), the top card Havoc / Cascade will play, which enemy each hit of Sword Boomerang, Ricochet, Flak Cannon, Volley, Bouncing Flask... will land on, Chaos orbs, Alchemize potions
+[*] [b]Potions[/b]: Attack / Skill / Power / Colorless Potion options, Cosmic Concoction, Orobic Acid, Entropic Brew, Distilled Chaos, Snecko Oil (draws and every new cost)
+[*] [b]Draw / discard pile buttons[/b]: the draw pile order after the next reshuffle, now and after your hand is discarded
+[*] [b]Neow[/b]: hover New Leaf, Astrolabe, Pandora's Box or Leafy Poultice and see what your cards would become, without picking the option
+[*] [b]Events[/b]: hover a "transform a card" option (Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove, Trial, Endless Conveyor) to see what each deck card would become; Endless Conveyor's random upgrade and random potion dishes; on any "choose a card to transform" screen, hover a card to see its result
+[/list]
+
+[h2]Notes[/h2]
+[list]
+[*] F8 toggles the overlay
+[*] Predictions refresh a few times per second while hovered, so if a relic or power consumes the same random stream first, the display corrects itself immediately
+[*] Singleplayer. No configuration, no dependencies, DLL only (game version 0.107 or newer)
+[*] Not covered yet: attack hit-count modifiers, relics that reorder shuffles, targets after an enemy dies mid-sequence
+[*] Inspired by the Slay the Spire 1 mod 随机数预测大师 (RandomNumberPredictionMaster) by FF; this is an independent rewrite for STS2
+[*] To report a problem, attach %APPDATA%\SlayTheSpire2\logs\RngPredictor.log
+[/list]
+
+Source: https://github.com/luojiesi/SLS2Mods

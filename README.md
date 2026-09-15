@@ -98,6 +98,33 @@ Automatically grants all three egg relics (Frozen Egg, Molten Egg, Toxic Egg) at
 
 ---
 
+### RngPredictor — Random Number Predictor (随机数预测)
+
+Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3802380322 (update it with
+`tools/WorkshopUploader` (`update --item 3802380322 ...`); package in `nexus_packages/workshop/RngPredictor`, preview
+must stay under 1 MB).
+
+Inspired by the STS1 Workshop mod **随机数预测大师 / RandomNumberPredictionMaster**. Hover something with a random
+effect and a panel at the top-left shows what it will actually do, computed on an exact clone of the game's RNG
+stream (`new Rng(seed, counter)`), so the answer is the real one, not a probability.
+
+| Hover | Shows |
+|-------|-------|
+| A hand card in combat | the cards it will generate / offer (Discovery, Infernal Blade, Quasar, Jackpot, ...), the card it will pick from your hand or piles (True Grit, Cinder, Thrash, Seeker Strike, Beat Down, Catastrophe, ...), the enemies each hit will land on (Sword Boomerang, Ricochet, Flak Cannon, Volley, Bouncing Flask, ...), orbs (Chaos), potions (Alchemize) |
+| A potion | Attack / Skill / Power / Colorless Potion options, Cosmic Concoction, Orobic Acid, Entropic Brew potions, Snecko Oil draws and every card's new cost |
+| The draw or discard pile | the draw pile order after the next reshuffle (top first), now and after the hand is discarded |
+| A deck card on a "choose a card to transform" screen (events, New Leaf, Astrolabe) | what it becomes as the 1st / 2nd / ... transformed card |
+| A Neow option that transforms cards (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice) | what every eligible deck card would become, before you pick it |
+| An event option with a random outcome (Endless Conveyor's random upgrade / potion / transform dishes, the transform options of Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove, Trial) | which card gets upgraded, which potion you get, what each deck card would become |
+
+**F8** toggles the mod. Predictions refresh a few times per second while hovered, so if a relic or power consumes
+the same RNG stream first, the display corrects itself immediately. Singleplayer.
+
+Verified in-game on v0.107.1 by a built-in self-test (`logs\RngPredictor.selftest`) and shadow verification of
+the game's own generators (`logs\RngPredictor.verify`); see [RngPredictor/DOCUMENTATION.md](RngPredictor/DOCUMENTATION.md).
+
+---
+
 ## Build & Deploy
 
 All mods target .NET 9.0 and reference `sts2.dll`, `0Harmony.dll`, and `GodotSharp.dll` from the game directory.
@@ -160,6 +187,16 @@ STS2Mods/
     UpgradeAllCardsMod.cs Harmony patches
     UpgradeAllCards.json  External manifest (0.99+)
     mod_manifest.json     Internal manifest (inside .pck)
+  RngPredictor/         Random-outcome preview on hover (F8 toggles)
+    RngPredictorMod.cs    Entry point, Harmony hooks (card holder / potion / pile focus, transform screen)
+    PredictionManager.cs  Hover state, periodic recompute, overlay driving
+    Predictors.cs         One predictor per card / potion / transform / shuffle
+    Sim.cs                Side-effect-free mirrors of the game's random generators on a cloned Rng
+    Overlay.cs            Godot overlay (NCard rows, text, enemy target markers)
+    Verify.cs             Shadow verification of the game's generators (logs/RngPredictor.verify)
+    SelfTest.cs           End-to-end in-game test (logs/RngPredictor.selftest)
+    RngPredictor.json     Manifest (DLL only)
+    DOCUMENTATION.md      Design notes
 ```
 
 ## Technology
