@@ -112,6 +112,20 @@ internal static class SelfTest
         if (!await RewindEngine.WaitUntil(() => rm.IsInProgress && rm.DebugOnlyGetState()?.CurrentRoom != null, 60, "run in progress")) return false;
         var rs = rm.DebugOnlyGetState()!;
         Log.Write($"SELFTEST: run loaded, room = {rs.CurrentRoom?.GetType().Name} ({rs.CurrentRoom?.RoomType})");
+        // logs/UndoAndRedo.selftest.encounter = <ENCOUNTER_ID>: jump straight into that fight (the "fight" console command).
+        string? encounterId = null;
+        try { var f = System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.selftest.encounter"); if (System.IO.File.Exists(f)) encounterId = System.IO.File.ReadAllText(f).Trim().ToUpperInvariant(); } catch { }
+        if (!string.IsNullOrEmpty(encounterId))
+        {
+            var modelId = new ModelId(ModelId.SlugifyCategory<EncounterModel>(), encounterId);
+            var encounter = ModelDb.GetById<EncounterModel>(modelId).ToMutable();
+            encounter.DebugRandomizeRng();
+            Log.Write($"SELFTEST: jumping to encounter {encounter.Id.Entry}");
+            for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
+            await rm.EnterRoomDebug(MegaCrit.Sts2.Core.Rooms.RoomType.Monster, MegaCrit.Sts2.Core.Map.MapPointType.Unassigned, encounter);
+            rs = rm.DebugOnlyGetState()!;
+            Log.Write($"SELFTEST: arrived, room = {rs.CurrentRoom?.GetType().Name} ({rs.CurrentRoom?.RoomType})");
+        }
         if (rs.CurrentRoom is not CombatRoom)
         {
             // Travel to the next monster node through the same call the map screen uses.

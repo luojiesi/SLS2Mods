@@ -160,6 +160,65 @@ internal sealed class ModelSnapshot
         _objects.Add(new ObjectRecord(obj, fields, values));
     }
 
+    // ── disposed Godot references ────────────────────────────────────────────
+
+    private static readonly Dictionary<Type, FieldInfo[]> _nodeFieldCache = new();
+
+    /// <summary>Instance fields that can hold a Godot object (declared as one, or as plain object).</summary>
+    private static FieldInfo[] NodeFieldsOf(Type t)
+    {
+        if (_nodeFieldCache.TryGetValue(t, out var f)) return f;
+        var list = new List<FieldInfo>();
+        for (var type = t; type != null && type != typeof(object); type = type.BaseType)
+            foreach (var fi in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                if (typeof(GodotObject).IsAssignableFrom(fi.FieldType) || fi.FieldType == typeof(object))
+                    list.Add(fi);
+        f = list.ToArray();
+        _nodeFieldCache[t] = f;
+        return f;
+    }
+
+    /// <summary>
+    /// Walks the model graph like <see cref="Capture"/> and nulls every field that still points at a Godot
+    /// object that has been freed (e.g. a monster caching a node of a combat room that no longer exists;
+    /// such caches are lazy getters that re-resolve when null). Returns the number of fields cleared.
+    /// </summary>
+    public static int ClearDisposedGodotReferences(params object?[] roots)
+    {
+        var walker = new ModelSnapshot();
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var queue = new Queue<object>();
+        foreach (var r in roots) if (r != null) walker.Discover(r, visited, queue);
+        int cleared = 0;
+        while (queue.Count > 0)
+        {
+            var obj = queue.Dequeue();
+            if (obj is Array arr)
+            {
+                if (arr.Rank != 1 || IsLeafType(arr.GetType().GetElementType()!)) continue;
+                for (int i = 0; i < arr.Length; i++) walker.Discover(arr.GetValue(i), visited, queue);
+                continue;
+            }
+            var t = obj.GetType();
+            foreach (var f in FieldsOf(t))
+            {
+                if (IsLeafType(f.FieldType)) continue;
+                object? v; try { v = f.GetValue(obj); } catch { continue; }
+                walker.Discover(v, visited, queue);
+            }
+            foreach (var f in NodeFieldsOf(t))
+            {
+                object? v; try { v = f.GetValue(obj); } catch { continue; }
+                if (v is GodotObject go && !GodotObject.IsInstanceValid(go))
+                {
+                    try { f.SetValue(obj, null); cleared++; Log.Write($"fastpath: cleared disposed {f.FieldType.Name} {t.Name}.{f.Name}"); }
+                    catch { }
+                }
+            }
+        }
+        return cleared;
+    }
+
     // ── restore ──────────────────────────────────────────────────────────────
 
     /// <summary>Writes every recorded field and array element back into the original instances.</summary>

@@ -42,13 +42,16 @@ internal static class VisualRebuild
     private static readonly FieldInfo? HolderTargetPos = AccessTools.Field(typeof(NHandCardHolder), "_targetPosition");
     private static readonly FieldInfo? RoomContainer = AccessTools.Field(typeof(NRun), "_roomContainer");
     private static readonly FieldInfo? UiState = AccessTools.Field(typeof(NCombatUi), "_state");
+    private static readonly PropertyInfo? RoomBackground = AccessTools.Property(typeof(NCombatRoom), "Background");
+    private static readonly PropertyInfo? RoomBgContainer = AccessTools.Property(typeof(NCombatRoom), "BgContainer");
 
     public static string ReflectionReport() =>
         $"OnCombatSetUp={(RoomOnCombatSetUp != null ? "OK" : "NULL")} OnTurnStarted={(EndTurnOnTurnStarted != null ? "OK" : "NULL")} " +
         $"NotifyCombatStateChanged={(TrackerNotify != null ? "OK" : "NULL")} _holders={(PotionHolders != null ? "OK" : "NULL")} " +
         $"_orbs={(OrbNodes != null ? "OK" : "NULL")} OrbOnCombatSetup={(OrbOnCombatSetup != null ? "OK" : "NULL")} " +
         $"RefreshAmount={(RelicRefreshAmount != null ? "OK" : "NULL")} _targetPosition={(HolderTargetPos != null ? "OK" : "NULL")} " +
-        $"_roomContainer={(RoomContainer != null ? "OK" : "NULL")} NCombatUi._state={(UiState != null ? "OK" : "NULL")}";
+        $"_roomContainer={(RoomContainer != null ? "OK" : "NULL")} NCombatUi._state={(UiState != null ? "OK" : "NULL")} " +
+        $"Background.set={(RoomBackground?.SetMethod != null ? "OK" : "NULL")} BgContainer={(RoomBgContainer != null ? "OK" : "NULL")}";
 
     /// <summary>
     /// A combat room whose UI was never activated crashes the game's screen-context update (its combat UI
@@ -86,9 +89,32 @@ internal static class VisualRebuild
         //    itself only gets away with that because combat is not "in progress" yet when it creates a room).
         var container = RoomContainer?.GetValue(nrun) as MegaCrit.Sts2.Core.Nodes.NSceneContainer
                         ?? throw new InvalidOperationException("NRun._roomContainer unavailable");
+        // The background is carried over rather than recreated: some bosses (Kaiser Crab) are drawn by the
+        // background and their monster models cache that node; a new background would leave them pointing
+        // at a freed node and would start hidden.
+        Node? keptBackground = null;
+        if (old.Background != null && GodotObject.IsInstanceValid(old.Background) && RoomBackground?.SetMethod != null && RoomBgContainer != null)
+        {
+            keptBackground = old.Background;
+            keptBackground.GetParent()?.RemoveChild(keptBackground);
+        }
         var fresh = NCombatRoom.Create(room, CombatRoomMode.ActiveCombat)
                     ?? throw new InvalidOperationException("NCombatRoom.Create returned null");
         container.SetCurrentScene(fresh);
+        if (keptBackground != null)
+        {
+            try
+            {
+                (RoomBgContainer!.GetValue(fresh) as Node)?.AddChild(keptBackground);
+                RoomBackground!.SetValue(fresh, keptBackground);
+                log($"{T()} background carried over");
+            }
+            catch (Exception ex)
+            {
+                log($"background carry-over failed ({ex.Message}); a new one will be created");
+                if (keptBackground.GetParent() == null) keptBackground.QueueFree();
+            }
+        }
         log($"{T()} room node replaced ({fresh.CreatureNodes.Count()} creature nodes)");
 
         // 3. Creatures that are dead or gone in the restored state get no node (the game removes theirs
@@ -109,7 +135,8 @@ internal static class VisualRebuild
             }
         }
 
-        // 4. What CombatManager.CombatSetUp does for a new room: activate the combat UI and the background.
+        // 4. What CombatManager.CombatSetUp does for a new room: activate the combat UI (and create a
+        //    background only if none was carried over).
         //    Only now is the room safe to become the active screen.
         if (RoomOnCombatSetUp != null) RoomOnCombatSetUp.Invoke(fresh, new object[] { cs });
         else { fresh.Ui.Activate(cs); fresh.SetUpBackground(rs); }

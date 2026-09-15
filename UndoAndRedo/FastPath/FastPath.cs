@@ -237,6 +237,10 @@ internal static class FastPath
 
             await VisualRebuild.Rebuild(rs, cs, room, T, FastLog);
             await VisualRebuild.WaitForVisuals(rs, minFrames: 5, timeoutMs: 1500, FastLog);
+            // The old room is freed at the end of the frame it was removed in; by now it is gone, so any model
+            // that cached one of its nodes must forget it (lazy caches re-resolve against the new room).
+            int cleared = ModelSnapshot.ClearDisposedGodotReferences(Roots(rm));
+            if (cleared > 0) FastLog($"{T()} cleared {cleared} reference(s) to freed nodes");
         }
         catch
         {
