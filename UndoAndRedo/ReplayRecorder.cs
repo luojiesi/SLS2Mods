@@ -251,6 +251,7 @@ internal sealed class ReplayRecorder
 
             var tracked = new TrackedAction { Action = action, EventIndex = idx };
             _tracked[idx] = tracked;
+            if (IsPlayerDecision(action)) RewindEngine.OnLiveDecision();
         }
         catch (Exception ex)
         {

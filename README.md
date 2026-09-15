@@ -6,11 +6,19 @@ A collection of quality-of-life mods for **Slay the Spire 2** (Godot 4.5.1 / C# 
 
 ### UndoAndRedo
 
-Combat undo/redo by **deterministic replay**. Instead of snapshotting state by hand, the mod reuses the game's own
-combat replay recorder (`CombatReplayWriter`) and replay player: undo rebuilds the run from the save the game
-took when the room was entered and re-feeds every recorded event except the last player decision, in the game's
-non-interactive replay mode. Redo feeds the removed events back in. State checksums (`NetFullCombatState`) verify
-each rewind.
+Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3801936266 (update it with
+`tools/WorkshopUploader` (`update --item 3801936266 ...`); package in `nexus_packages/workshop/UndoAndRedo`).
+
+Combat undo/redo, two mechanisms kept apart:
+
+- **Fast path** (default): before every player decision the mod takes an in-place memento of the whole combat
+  model (every field of every reachable object, ~1 ms). Undo writes it back into the same objects, verifies the
+  game's own state checksum (`NetFullCombatState`), and rebuilds the combat screen from the model. About 0.1 s
+  at any depth.
+- **Replay path** (fallback, and always used for redo): the game's own combat replay recorder
+  (`CombatReplayWriter`) and replay player. Undo rebuilds the run from the save the game took when the room was
+  entered and re-feeds every recorded event except the undone decision in the game's non-interactive replay
+  mode; redo feeds the removed events back in. Used whenever the fast path has no verified memento.
 
 | Key | Action |
 |-----|--------|
@@ -21,14 +29,14 @@ each rewind.
 - No hand-written state capture: anything the game can replay in multiplayer, this mod can undo
 - Works across turns (undoing an end-turn rewinds the whole enemy turn), with potions, with card-selection prompts
 - Can be pressed mid-animation or during the enemy turn
-- Unbounded undo depth within a combat; redo stack invalidated by any new action
-- Verifies event count and state checksum after every rewind, logs to `%APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log`
+- Unbounded undo depth within a combat; redo stack cleared by any new action
+- Verifies the state checksum after every rewind (and the event count after replays), logs to `%APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log`
 - Built-in end-to-end self-test (see documentation)
 
 **Limitations:**
 - Singleplayer only
 - Not available in fights started from an event (room stack depth > 1)
-- Each rewind rebuilds the room (~0.26 s, plus ~0.12 s per earlier turn replayed: ~1.2 s at turn 8)
+- Fast-path undo ~0.1 s; a replay-path undo rebuilds the room (~0.4 s plus ~0.12 s per earlier turn replayed)
 
 See [UndoAndRedo/DOCUMENTATION.md](UndoAndRedo/DOCUMENTATION.md) for the design.
 

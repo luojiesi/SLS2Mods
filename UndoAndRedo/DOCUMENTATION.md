@@ -94,9 +94,9 @@ but never blocks play.
 
 ## Fast path
 
-Enabled by the file `<user data>/logs/UndoAndRedo.fastpath` containing `on` (`shadow` = dual-run research
-mode: trial restore, put the live state back, then replay as usual; anything else or no file = off, replay
-only). Results and timings go to `logs/UndoAndRedo.fastpath.log`.
+On by default. The file `<user data>/logs/UndoAndRedo.fastpath` containing `off` disables it (replay only);
+`shadow` is the dual-run research mode (trial restore, put the live state back, then replay as usual).
+Results and timings go to `logs/UndoAndRedo.fastpath.log`.
 
 **Capture** (`ReplayRecorder.OnBeforeActionExecuted` → `FastPath.CaptureBeforeDecision`): right before a player
 decision starts executing, and only if that decision is the *only* queued action (no other queued actions, no
@@ -116,12 +116,18 @@ redo.
    the replay path runs.
 3. The undone decision is still at the front of the restored queue: it is removed, the queue's next action id
    is set back to the decision's id, the executor's `CurrentlyRunningAction` is cleared, the game's replay log
-   and the recorder's bookkeeping are cut to the kept prefix. From here on redo works exactly as after a
-   replay-based undo.
+   and the recorder's bookkeeping are cut to the kept prefix. Side effects the game applied when the decision
+   was *enqueued* are undone by hand: a potion's `IsQueued` flag (set before its `UsePotionAction` is enqueued;
+   the potion popup disables use/discard while it is set). From here on redo works exactly as after a
+   replay-based undo. A new live decision after an undo drops the redo history.
 4. `VisualRebuild.Rebuild`: the `NCombatRoom` node is replaced through `NRun._roomContainer` by a fresh one
    (`NCombatRoom.Create` + the room's own `OnCombatSetUp`), which builds creature nodes, HP/block/power
-   displays, piles, energy counter, end-turn button and background from the model the way a new combat does.
-   Freeing the old room drops every event subscription its nodes held. Then: nodes of dead/removed creatures
+   displays, piles, energy counter and end-turn button from the model the way a new combat does. The
+   background node is carried over from the old room instead of recreated: some bosses (Kaiser Crab) are
+   drawn by the background and their monster models cache that node. Freeing the old room drops every event
+   subscription its nodes held; once it is actually freed (end of frame), every model field still pointing
+   at a freed Godot object is nulled (`ModelSnapshot.ClearDisposedGodotReferences`; such caches are lazy
+   getters that re-resolve). Then: nodes of dead/removed creatures
    are dropped, creature screen positions are copied from the old room, hand cards are created from the hand
    pile, the end-turn button gets its `OnTurnStarted`, intents are refreshed, orb slots/orbs are placed, potion
    slots are synced to `Player.PotionSlots`, top-bar HP/gold and relic counters are refreshed, and
@@ -204,7 +210,9 @@ UndoAndRedo/
 
 Create an empty file `<user data>/logs/UndoAndRedo.selftest` (user data is `%APPDATA%\SlayTheSpire2`) and
 start the game. With a saved run the mod continues it (travelling to the next monster node if needed); without
-one it starts an unsaved Ironclad run (seed from `logs/UndoAndRedo.selftest.seed`, default `UNDOTEST`). It
+one, or if `logs/UndoAndRedo.selftest.fresh` exists, it starts an unsaved Ironclad run (seed from
+`logs/UndoAndRedo.selftest.seed`, default `UNDOTEST`). `logs/UndoAndRedo.selftest.encounter` containing an
+encounter id (e.g. `KAISER_CRAB_BOSS`) jumps straight into that fight, like the `fight` console command. It
 plays up to 3 cards per turn for N turns (`logs/UndoAndRedo.selftest.turns`, default 8; use 2–3 for the
 starter deck or the fight ends early) through the real action path, undoes everything step by step, redoes
 everything, undoes once more, plays one card live and undoes that, compares checksums after every step, checks
@@ -214,7 +222,10 @@ the profile's saves first when testing on a saved run.
 
 ## Test status (2026-09-14, v0.107.1)
 
-Fast path (`fastpath` = `on`), unsaved Ironclad run, 2 turns / 8 decisions: 8 fast undos at 115–118 ms each
+Fast path, five scenarios (starter fights with two seeds, potion use, Kaiser Crab boss), each 8–12 decisions
+undone one by one, redone, undone again after a redo, and undone after live play; every step checksum-verified,
+screen consistent with the model, all PASS. One full real run by the player with no defects. Representative run
+(2 turns / 8 decisions): 8 fast undos at 115–118 ms each
 (restore + checksum 25 ms, room rebuild 10 ms, the rest is the 5-frame visual settle), 8 redos at 100–200 ms,
 final undo and undo-after-live-play at ~90–107 ms, all checksums equal to the recorded ones, screen consistent
 with the model at every step, PASS. Shadow mode earlier: 8/8 trial restores reproduced the expected checksum
@@ -258,6 +269,12 @@ construction during replay or keeping the `NRun` scene alive across the rewind, 
 
 Do not try to speed up physics (`Engine.PhysicsTicksPerSecond` = 1 crashed the engine with unbounded memory
 growth); physics is left untouched.
+
+## Publishing
+
+Steam Workshop item: see README. Package layout `nexus_packages/workshop/UndoAndRedo/content/UndoAndRedo/{dll,json}`
+plus `description.txt` (Steam BBCode) and `preview.png`; upload with `tools/WorkshopUploader` (`create` for the
+first upload, `update --item <id>` afterwards; Steam must be running and logged in).
 
 ## Build & deploy
 

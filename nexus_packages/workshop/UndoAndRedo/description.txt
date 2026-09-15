@@ -1,0 +1,22 @@
+Undo and redo your combat actions. Press Left Arrow to take back the last card play, potion use or end of turn; press Right Arrow to redo it. Undo as many steps as you like, all the way back to the start of the fight, across turns.
+
+[h2]How it works[/h2]
+[list]
+[*] Left Arrow: undo the last decision (card played, potion used or discarded, turn ended)
+[*] Right Arrow: redo it
+[*] Any depth within the current fight; enemy turns are rewound together with your end-of-turn
+[*] Works with card selection prompts, potions, powers, multi-enemy fights and bosses
+[/list]
+
+[h2]Under the hood[/h2]
+The mod keeps a memento of the whole combat model before every decision and writes it back in place on undo (about 0.1 s), then rebuilds the combat screen from the model. Every undo is verified against the game's own state checksum; if anything does not match, the mod falls back to rebuilding the fight from the game's combat replay log, so you never get a wrong state silently.
+
+[h2]Notes[/h2]
+[list]
+[*] Singleplayer only
+[*] Fights started from events cannot be rewound (a toast tells you)
+[*] No configuration, no dependencies, DLL only (game version 0.107 or newer)
+[*] Logs go to %APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log if you want to report a problem
+[/list]
+
+Source: https://github.com/luojiesi/SLS2Mods

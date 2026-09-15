@@ -18,7 +18,7 @@ namespace UndoAndRedo.FastPath;
 
 public enum FastPathMode
 {
-    /// <summary>Fast path code does not run at all.</summary>
+    /// <summary>Fast path code does not run at all (replay only).</summary>
     Off,
     /// <summary>Dual run: try the fast restore, measure it, put the live state back, then do the normal replay.</summary>
     Shadow,
@@ -27,7 +27,8 @@ public enum FastPathMode
 }
 
 /// <summary>
-/// Snapshot-based rewind. Inert unless logs/UndoAndRedo.fastpath contains "shadow" or "on".
+/// Snapshot-based rewind. On by default; logs/UndoAndRedo.fastpath containing "off" disables it (replay only)
+/// and "shadow" turns on the dual-run research mode.
 ///
 /// Capture: right before a player decision starts executing, while it is the only queued action, an in-place
 /// memento of the whole model graph is taken (<see cref="ModelSnapshot"/>, a few ms).
@@ -50,11 +51,11 @@ internal static class FastPath
         {
             try
             {
-                if (!System.IO.File.Exists(ModePath)) return FastPathMode.Off;
+                if (!System.IO.File.Exists(ModePath)) return FastPathMode.On;
                 var text = System.IO.File.ReadAllText(ModePath).Trim().ToLowerInvariant();
-                return text == "on" ? FastPathMode.On : text == "shadow" ? FastPathMode.Shadow : FastPathMode.Off;
+                return text == "off" ? FastPathMode.Off : text == "shadow" ? FastPathMode.Shadow : FastPathMode.On;
             }
-            catch { return FastPathMode.Off; }
+            catch { return FastPathMode.On; }
         }
     }
 

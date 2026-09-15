@@ -120,6 +120,14 @@ internal static class RewindEngine
                                timeoutSec, "idle play phase");
     }
 
+    /// <summary>A live player decision after an undo makes the redo history unreachable; drop it.</summary>
+    public static void OnLiveDecision()
+    {
+        if (ReplayModeActive || _busy || _redo.Count == 0) return;
+        Log.Write($"New live decision; clearing {_redo.Count} redo entr{(_redo.Count == 1 ? "y" : "ies")}");
+        _redo.Clear();
+    }
+
     public static void OnRunCleanUp()
     {
         if (_ownRebuild) return;
@@ -247,7 +255,7 @@ internal static class RewindEngine
 
             int remaining = ReplayRecorder.Boundaries(prefix).Count;
             Log.Write($"=== UNDO {(ok ? "complete" : "FAILED")} via {(fastDone ? "fast path" : "replay")} in {sw.ElapsedMilliseconds} ms; undo depth left {remaining}, redo {_redo.Count} ===");
-            UndoAndRedoMod.Toast(ok ? $"Undo{(fastDone ? "*" : "")}  ({remaining} left, {_redo.Count} redo)" : "Undo failed — see UndoAndRedo.log");
+            UndoAndRedoMod.Toast(ok ? $"Undo  ({remaining} left, {_redo.Count} redo)" : "Undo failed — see UndoAndRedo.log");
             return ok;
         }
         catch (Exception ex)
