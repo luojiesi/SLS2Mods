@@ -39,7 +39,7 @@ Combat undo/redo, two mechanisms kept apart:
 - Mods that auto-end the turn (SpeedX) end it again right after an end-of-turn is undone
 - Fast-path undo ~0.1 s; a replay-path undo rebuilds the room (~0.4 s plus ~0.12 s per earlier turn replayed)
 
-See [UndoAndRedo/DOCUMENTATION.md](UndoAndRedo/DOCUMENTATION.md) for the design.
+See [UndoAndRedo/DOCUMENTATION.md](UndoAndRedo/DOCUMENTATION.md) for the design and [UndoAndRedo/LESSONS.md](UndoAndRedo/LESSONS.md) for the bugs found, root causes, testing method and compatibility audit.
 
 -----|--------|
 | **Left Arrow** | Undo |

@@ -4,6 +4,9 @@ Press **Left Arrow** to undo the last player decision in combat, **Right Arrow**
 
 Targets Slay the Spire 2 **v0.107.1** (Godot 4.5 / .NET 9, HarmonyX). Singleplayer only.
 
+See [LESSONS.md](LESSONS.md) for every bug found on the way here, its root cause, the testing method and the
+compatibility audit — read it before changing the mod.
+
 Two mechanisms, kept apart on purpose:
 
 * **Replay path** (`RewindEngine`, the original 2.0 design): rebuild the run from the game's own combat replay
