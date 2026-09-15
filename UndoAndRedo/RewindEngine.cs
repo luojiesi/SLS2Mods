@@ -99,7 +99,7 @@ internal static class RewindEngine
                   $"InitializeRunLobby = {(InitializeRunLobbyMethod != null ? "OK" : "NULL")}, " +
                   $"InitializeSavedRun = {(InitializeSavedRunMethod != null ? "OK" : "NULL")}");
         if (InitializeSharedMethod != null)
-            Log.Write("InitializeShared params: " + string.Join(", ", InitializeSharedMethod.GetParameters().Select(p => $"{p.ParameterType.Name} {p.Name}")));
+            Log.Debug("InitializeShared params: " + string.Join(", ", InitializeSharedMethod.GetParameters().Select(p => $"{p.ParameterType.Name} {p.Name}")));
     }
 
     // ── public entry points ──────────────────────────────────────────────────
@@ -124,14 +124,14 @@ internal static class RewindEngine
     public static void OnLiveDecision()
     {
         if (ReplayModeActive || _busy || _redo.Count == 0) return;
-        Log.Write($"New live decision; clearing {_redo.Count} redo entr{(_redo.Count == 1 ? "y" : "ies")}");
+        Log.Debug($"New live decision; clearing {_redo.Count} redo entr{(_redo.Count == 1 ? "y" : "ies")}");
         _redo.Clear();
     }
 
     public static void OnRunCleanUp()
     {
         if (_ownRebuild) return;
-        if (_redo.Count > 0) Log.Write("Run cleaned up; clearing redo history");
+        if (_redo.Count > 0) Log.Debug("Run cleaned up; clearing redo history");
         _redo.Clear();
     }
 
@@ -189,12 +189,13 @@ internal static class RewindEngine
             }
 
             var events = replay.events.ToList();
-            Log.Write($"=== UNDO requested: {events.Count} recorded events ===\n{rec.DumpEvents(events)}");
+            Log.Write($"=== UNDO requested: {events.Count} recorded events ===");
+            Log.Debug(rec.DumpEvents(events));
 
             int target = rec.ComputeUndoTarget(events, out var reason);
             if (target < 0)
             {
-                Log.Write($"Nothing to undo: {reason}");
+                Log.Debug($"Nothing to undo: {reason}");
                 UndoAndRedoMod.Toast("Nothing to undo");
                 return false;
             }
@@ -206,7 +207,7 @@ internal static class RewindEngine
             var expectedShadow = rec.ShadowBefore(target);
             uint? liveChecksum = rec.CurrentChecksum();
             var liveShadow = ShadowSnapshot.Enabled ? ShadowSnapshot.Capture("live state at undo time") : null;
-            Log.Write($"Undo target = {target} ({ReplayRecorder.Describe(events[target])}); keeping {prefix.Count} events, {segments.Count} redo segment(s), expected checksum = {(expected.HasValue ? expected.Value.ToString() : "n/a")}");
+            Log.Debug($"Undo target = {target} ({ReplayRecorder.Describe(events[target])}); keeping {prefix.Count} events, {segments.Count} redo segment(s), expected checksum = {(expected.HasValue ? expected.Value.ToString() : "n/a")}");
 
             var header = CloneHeader(replay);
 
@@ -298,7 +299,8 @@ internal static class RewindEngine
             }
             _redo.RemoveAt(_redo.Count - 1);
 
-            Log.Write($"=== REDO: feeding {entry.Segment.Count} events ===\n{rec.DumpEvents(entry.Segment)}");
+            Log.Write($"=== REDO: feeding {entry.Segment.Count} events ===");
+            Log.Debug(rec.DumpEvents(entry.Segment));
             var runState = rec.RunState!;
 
             await CoverScreen();
@@ -337,7 +339,7 @@ internal static class RewindEngine
                 }
                 else if (actual.HasValue)
                 {
-                    Log.Write($"Checksum verified: {actual.Value}");
+                    Log.Debug($"Checksum verified: {actual.Value}");
                 }
             }
 
@@ -389,7 +391,7 @@ internal static class RewindEngine
         string T() => $"[+{sw.ElapsedMilliseconds} ms, {_frameCounter - f0} frames]";
 
         await CoverScreen();
-        Log.Write($"{T()} screen covered");
+        Log.Debug($"{T()} screen covered");
 
         bool ok = false;
         try
@@ -401,7 +403,7 @@ internal static class RewindEngine
             rm.ActionQueueSet.Reset();
             rm.CleanUp();
             _ownRebuild = false;
-            Log.Write($"{T()} teardown complete");
+            Log.Debug($"{T()} teardown complete");
 
             // 2. Rebuild the run from the save taken at map-point entry, with our switchable net service.
             var runState = RunState.FromSerializable(header.Save);
@@ -409,17 +411,17 @@ internal static class RewindEngine
             SetUpSavedRun(rm, runState, header.Save, service);
             rm.CombatStateSynchronizer.IsDisabled = true;
             game.ReactionContainer.InitializeNetworking(service);
-            Log.Write($"{T()} run rebuilt: act={runState.CurrentActIndex} floor={runState.TotalFloor}");
+            Log.Debug($"{T()} run rebuilt: act={runState.CurrentActIndex} floor={runState.TotalFloor}");
 
             // 3. Enter the room the same way the game's replay viewer does.
             // Run/act assets are already resident (same character, same act); each of the game's preload
             // calls ends with a full GC.Collect, so skipping them saves a few hundred ms.
             rm.Launch();
-            Log.Write($"{T()} launch");
+            Log.Debug($"{T()} launch");
             game.RootSceneContainer.SetCurrentScene(NRun.Create(runState));
-            Log.Write($"{T()} NRun created");
+            Log.Debug($"{T()} NRun created");
             await rm.GenerateMap();
-            Log.Write($"{T()} map generated");
+            Log.Debug($"{T()} map generated");
             rm.ActionQueueSet.FastForwardNextActionId(header.NextActionId);
             rm.ActionQueueSynchronizer.FastForwardHookId(header.NextHookId);
             rm.PlayerChoiceSynchronizer.FastForwardChoiceIds(header.ChoiceIds);
@@ -430,13 +432,13 @@ internal static class RewindEngine
                 NRun.Instance.GlobalUi.MapScreen.Drawings.LoadDrawings(rm.MapDrawingsToLoad);
                 rm.MapDrawingsToLoad = null;
             }
-            Log.Write($"{T()} room entered: {rm.DebugOnlyGetState()?.CurrentRoom?.GetType().Name} {rm.DebugOnlyGetState()?.CurrentRoom?.ModelId}");
+            Log.Debug($"{T()} room entered: {rm.DebugOnlyGetState()?.CurrentRoom?.GetType().Name} {rm.DebugOnlyGetState()?.CurrentRoom?.ModelId}");
 
             // 4. Wait for the play phase of turn 1.
             var cmTrace = CombatManager.Instance;
-            Action<CombatState> onSetUp = _ => Log.Write($"{T()}   combat set up");
-            Action<CombatState> onTurnStarted = _ => Log.Write($"{T()}   turn started (round {cmTrace.DebugOnlyGetState()?.RoundNumber}, side {cmTrace.DebugOnlyGetState()?.CurrentSide})");
-            Action<CombatState> onTurnEnded = _ => Log.Write($"{T()}   turn ended");
+            Action<CombatState> onSetUp = _ => Log.Debug($"{T()}   combat set up");
+            Action<CombatState> onTurnStarted = _ => Log.Debug($"{T()}   turn started (round {cmTrace.DebugOnlyGetState()?.RoundNumber}, side {cmTrace.DebugOnlyGetState()?.CurrentSide})");
+            Action<CombatState> onTurnEnded = _ => Log.Debug($"{T()}   turn ended");
             cmTrace.CombatSetUp += onSetUp; cmTrace.TurnStarted += onTurnStarted; cmTrace.TurnEnded += onTurnEnded;
             try
             {
@@ -444,15 +446,15 @@ internal static class RewindEngine
                                        && rm.ActionQueueSynchronizer.CombatState == ActionSynchronizerCombatState.PlayPhase,
                                  CombatStartTimeoutSec, "combat start"))
                 return false;
-            Log.Write($"{T()} play phase reached");
+            Log.Debug($"{T()} play phase reached");
 
             // 5. Feed the kept events and wait for everything to settle.
             var fed = await FeedEvents(prefix, runState);
-            Log.Write($"{T()} events fed");
+            Log.Debug($"{T()} events fed");
             ok = await WaitForSettle(fed);
-            Log.Write($"{T()} settled");
+            Log.Debug($"{T()} settled");
             await WaitForVisuals(runState);
-            Log.Write($"{T()} visuals ready");
+            Log.Debug($"{T()} visuals ready");
             }
             finally
             {
@@ -479,7 +481,7 @@ internal static class RewindEngine
                 }
                 else if (actual.HasValue)
                 {
-                    Log.Write($"Checksum verified: {actual.Value}");
+                    Log.Debug($"Checksum verified: {actual.Value}");
                 }
             }
         }
@@ -491,7 +493,7 @@ internal static class RewindEngine
 
         RestoreEnemyPositions(enemyPositions);
         await UncoverScreen();
-        Log.Write($"{T()} screen uncovered");
+        Log.Debug($"{T()} screen uncovered");
 
         try
         {
@@ -660,9 +662,9 @@ internal static class RewindEngine
                                             || fed.Any(a => a.State is GameActionState.GatheringPlayerChoice),
                                       30, $"start of event #{n} {action.GetType().Name}");
                 }
-                Log.Write($"    feed #{n} {action.GetType().Name}: {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, state={action.State})");
+                Log.Debug($"    feed #{n} {action.GetType().Name}: {fsw.ElapsedMilliseconds - evStart} ms (t={fsw.ElapsedMilliseconds}, state={action.State})");
             }
-            Log.Write($"Fed {i} events ({fed.Count} actions)");
+            Log.Debug($"Fed {i} events ({fed.Count} actions)");
         }
         finally
         {
@@ -709,7 +711,7 @@ internal static class RewindEngine
                     }
                 }
                 string now = $"holders={holders?.Count} model={model} inPlace={inPlace} maxDist={maxDist:F1}";
-                if (now != last) { Log.Write("visuals: " + now); last = now; }
+                if (now != last) { Log.Debug("visuals: " + now); last = now; }
                 if (inPlace && ++stable >= 3) break;
                 if (!inPlace) stable = 0;
                 await NextFrame();
@@ -736,7 +738,7 @@ internal static class RewindEngine
         {
             if (!cm.IsInProgress)
             {
-                Log.Write("Settle: combat ended during replay — divergence");
+                Log.Debug("Settle: combat ended during replay — divergence");
                 return false;
             }
             var cs = cm.DebugOnlyGetState();
@@ -752,7 +754,7 @@ internal static class RewindEngine
             {
                 if (++stable >= SettleStableFrames)
                 {
-                    Log.Write($"Settled after {Time.GetTicksMsec() - start} ms (round {cs?.RoundNumber})");
+                    Log.Debug($"Settled after {Time.GetTicksMsec() - start} ms (round {cs?.RoundNumber})");
                     return true;
                 }
             }
@@ -760,7 +762,7 @@ internal static class RewindEngine
             {
                 stable = 0;
                 string now = $"queueEmpty={queueEmpty} execIdle={execIdle} playPhase={playPhase} openFed={openFed} side={cs?.CurrentSide} sync={rm.ActionQueueSynchronizer.CombatState}";
-                if (now != last) { Log.Write("Settle: " + now); last = now; }
+                if (now != last) { Log.Debug("Settle: " + now); last = now; }
             }
 
             if (Time.GetTicksMsec() - start > ReplaySettleTimeoutSec * 1000)
@@ -819,7 +821,7 @@ internal static class RewindEngine
                 RenderingServer.RenderLoopEnabled = false;
         }
         catch (Exception ex) { Log.Write($"Engine speed settings failed: {ex.Message}"); }
-        Log.Write("Replay mode ON");
+        Log.Debug("Replay mode ON");
     }
 
     private static void ExitReplayMode(FastModeType restoreFastMode)
@@ -839,7 +841,7 @@ internal static class RewindEngine
             }
         }
         catch (Exception ex) { Log.Write($"Engine speed settings restore failed: {ex.Message}"); }
-        Log.Write("Replay mode OFF");
+        Log.Debug("Replay mode OFF");
     }
 
     // ── debug: per-frame screenshots while covered (enable with logs/UndoAndRedo.capture) ──
@@ -888,7 +890,7 @@ internal static class RewindEngine
         DumpCanvasLayers(dir, "_after");
         DumpTransition(dir, "after");
         DumpBigControls(dir, "end");
-        Log.Write($"capture: {n} frames written to {dir}");
+        Log.Debug($"capture: {n} frames written to {dir}");
     }
 
     /// <summary>Lists every visible CanvasItem covering at least a quarter of the screen (to find stray overlays).</summary>

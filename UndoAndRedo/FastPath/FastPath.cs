@@ -62,9 +62,18 @@ internal static class FastPath
     /// <summary>True while the combat visuals are being rebuilt: hand card motion is snapped (see the NHandCardHolder patches).</summary>
     public static bool VisualSyncActive { get; private set; }
 
+    /// <summary>Trace line: goes to logs/UndoAndRedo.fastpath.log and the debug log, only while debugging.</summary>
     private static void FastLog(string msg)
     {
+        if (!Log.DebugEnabled) return;
         try { System.IO.File.AppendAllText(FastLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{System.Environment.NewLine}"); } catch { }
+        Log.Write("fastpath: " + msg);
+    }
+
+    /// <summary>Something a bug report needs: always logged.</summary>
+    private static void FastWarn(string msg)
+    {
+        try { if (Log.DebugEnabled) System.IO.File.AppendAllText(FastLogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{System.Environment.NewLine}"); } catch { }
         Log.Write("fastpath: " + msg);
     }
 
@@ -138,7 +147,7 @@ internal static class FastPath
             int waiting = WaitingForResumptionCount(rm.ActionQueueSet);
             if (queued.Count != 1 || !ReferenceEquals(queued[0], decision) || waiting != 0)
             {
-                FastLog($"no capture for event {eventIndex} ({decision.GetType().Name}): queue holds {queued.Count} action(s), {waiting} waiting for resumption");
+                FastWarn($"no capture for event {eventIndex} ({decision.GetType().Name}): queue holds {queued.Count} action(s), {waiting} waiting for resumption");
                 return null;
             }
             var snap = ModelSnapshot.Capture($"before event {eventIndex} ({decision.GetType().Name})", Roots(rm));
@@ -147,7 +156,7 @@ internal static class FastPath
         }
         catch (Exception ex)
         {
-            FastLog($"capture failed: {ex}");
+            FastWarn($"capture failed: {ex}");
             return null;
         }
     }
@@ -190,19 +199,19 @@ internal static class FastPath
         var rm = RunManager.Instance;
         var cm = CombatManager.Instance;
 
-        if (!expectedChecksum.HasValue) { FastLog($"undo -> event {target}: no expected checksum; using replay"); return false; }
-        if (!IsIdlePlayPhase(out var why)) { FastLog($"undo -> event {target}: not idle ({why}); using replay"); return false; }
+        if (!expectedChecksum.HasValue) { FastWarn($"undo -> event {target}: no expected checksum; using replay"); return false; }
+        if (!IsIdlePlayPhase(out var why)) { FastWarn($"undo -> event {target}: not idle ({why}); using replay"); return false; }
         var rs = rm.DebugOnlyGetState();
         var cs = cm.DebugOnlyGetState();
         if (rs == null || cs == null || rs.CurrentRoom is not CombatRoom room || NRun.Instance == null || NCombatRoom.Instance == null)
         {
-            FastLog($"undo -> event {target}: no live combat room; using replay");
+            FastWarn($"undo -> event {target}: no live combat room; using replay");
             return false;
         }
 
         ModelSnapshot live;
         try { live = ModelSnapshot.Capture("live state at undo time", Roots(rm)); }
-        catch (Exception ex) { FastLog($"live capture failed: {ex.Message}; using replay"); return false; }
+        catch (Exception ex) { FastWarn($"live capture failed: {ex.Message}; using replay"); return false; }
 
         await ScreenCover.Show();
 
@@ -213,7 +222,7 @@ internal static class FastPath
         if (!sum.HasValue || sum.Value != expectedChecksum.Value)
         {
             var back = live.Restore();
-            FastLog($"{T()} checksum mismatch; live state put back ({back.errors} errors); using replay");
+            FastWarn($"{T()} checksum mismatch; live state put back ({back.errors} errors); using replay");
             await ScreenCover.Hide();
             return false;
         }
@@ -241,7 +250,7 @@ internal static class FastPath
             // The old room is freed at the end of the frame it was removed in; by now it is gone, so any model
             // that cached one of its nodes must forget it (lazy caches re-resolve against the new room).
             int cleared = ModelSnapshot.ClearDisposedGodotReferences(Roots(rm));
-            if (cleared > 0) FastLog($"{T()} cleared {cleared} reference(s) to freed nodes");
+            if (cleared > 0) FastWarn($"{T()} cleared {cleared} reference(s) to freed nodes");
         }
         catch
         {
@@ -266,7 +275,7 @@ internal static class FastPath
         bool removed = false;
         foreach (var list in QueueLists(set))
             removed |= list.Remove(decision);
-        if (!removed) FastLog($"warning: {decision} was not in any queue after restore");
+        if (!removed) FastWarn($"warning: {decision} was not in any queue after restore");
         if (decision.Id.HasValue && NextIdField != null) NextIdField.SetValue(set, decision.Id.Value);
         RunningProp?.SetValue(rm.ActionExecutor, null);
 
@@ -280,7 +289,7 @@ internal static class FastPath
             {
                 potion.AfterUsageCanceled();
                 try { NRun.Instance?.GlobalUi.TopBar.PotionContainer.OnPotionUseOrDiscardCanceled(potion); }
-                catch (Exception ex) { FastLog($"potion holder re-enable: {ex.Message}"); }
+                catch (Exception ex) { FastWarn($"potion holder re-enable: {ex.Message}"); }
                 FastLog($"cleared queued flag on {potion.Id.Entry}");
             }
         }
@@ -313,7 +322,7 @@ internal static class FastPath
         uint? liveBefore = rec.CurrentChecksum();
         ModelSnapshot live;
         try { live = ModelSnapshot.Capture("live state at undo time", Roots(rm)); }
-        catch (Exception ex) { FastLog($"live capture failed: {ex}"); return false; }
+        catch (Exception ex) { FastWarn($"live capture failed: {ex}"); return false; }
 
         bool ok = false;
         uint? fastSum = null;
@@ -331,7 +340,7 @@ internal static class FastPath
         }
         catch (Exception ex)
         {
-            FastLog($"restore threw: {ex}");
+            FastWarn($"restore threw: {ex}");
         }
         finally
         {
@@ -345,12 +354,12 @@ internal static class FastPath
             }
             catch (Exception ex)
             {
-                FastLog($"putting live state back threw: {ex}");
+                FastWarn($"putting live state back threw: {ex}");
                 ok = false;
             }
         }
         sw.Stop();
-        FastLog($"shadow trial for undo -> event {target}: {(ok ? "PASS" : "FAIL")} in {sw.Elapsed.TotalMilliseconds:F1} ms");
+        FastWarn($"shadow trial for undo -> event {target}: {(ok ? "PASS" : "FAIL")} in {sw.Elapsed.TotalMilliseconds:F1} ms");
         if (expectedShadow != null && fastShadow != null)
             ShadowSnapshot.CompareInBackground(expectedShadow, fastShadow, $"FASTPATH restore -> event {target}");
         return ok;

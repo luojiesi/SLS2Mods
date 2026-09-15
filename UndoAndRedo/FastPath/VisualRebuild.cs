@@ -111,7 +111,7 @@ internal static class VisualRebuild
             }
             catch (Exception ex)
             {
-                log($"background carry-over failed ({ex.Message}); a new one will be created");
+                Log.Write("fastpath: " + $"background carry-over failed ({ex.Message}); a new one will be created");
                 if (keptBackground.GetParent() == null) keptBackground.QueueFree();
             }
         }
@@ -164,14 +164,14 @@ internal static class VisualRebuild
             EndTurnOnTurnStarted?.Invoke(endTurn, new object[] { cs });
             endTurn.RefreshEnabled();
         }
-        catch (Exception ex) { log($"end turn button: {ex.Message}"); }
+        catch (Exception ex) { Log.Write("fastpath: " + $"end turn button: {ex.Message}"); }
 
         // 7. Enemy intents.
         foreach (var n in fresh.CreatureNodes)
         {
             if (n.Entity.Monster == null || n.Entity.IsDead) continue;
             try { await n.RefreshIntents(); }
-            catch (Exception ex) { log($"intents for {n.Entity}: {ex.Message}"); }
+            catch (Exception ex) { Log.Write("fastpath: " + $"intents for {n.Entity}: {ex.Message}"); }
         }
 
         // 8. Orb slots and orbs (Defect). Slots come from the same handler the game runs at combat set-up;
@@ -192,7 +192,7 @@ internal static class VisualRebuild
                     om.UpdateVisuals(OrbEvokeType.None);
                 }
             }
-            catch (Exception ex) { log($"orbs: {ex.Message}"); }
+            catch (Exception ex) { Log.Write("fastpath: " + $"orbs: {ex.Message}"); }
         }
 
         // 9. Potion belt (global UI, survives the room swap): make each slot show the model's potion.
@@ -228,7 +228,7 @@ internal static class VisualRebuild
                 if (changed > 0) log($"{T()} potions: {changed} slot(s) updated");
             }
         }
-        catch (Exception ex) { log($"potions: {ex.Message}"); }
+        catch (Exception ex) { Log.Write("fastpath: " + $"potions: {ex.Message}"); }
 
         // 10. Top bar HP / gold and relic counters are event-driven; the restore fired no events.
         try
@@ -242,13 +242,13 @@ internal static class VisualRebuild
                 RelicRefreshStatus?.Invoke(holder, null);
             }
         }
-        catch (Exception ex) { log($"top bar / relics: {ex.Message}"); }
+        catch (Exception ex) { Log.Write("fastpath: " + $"top bar / relics: {ex.Message}"); }
 
         // 11. Let every listener recompute (card playability, energy label, end-turn glow, intent numbers).
         try { TrackerNotify?.Invoke(CombatManager.Instance.StateTracker, new object[] { "UndoAndRedo fast path" }); }
-        catch (Exception ex) { log($"state notify: {ex.Message}"); }
+        catch (Exception ex) { Log.Write("fastpath: " + $"state notify: {ex.Message}"); }
 
-        try { fresh.EnableControllerNavigation(); } catch (Exception ex) { log($"navigation: {ex.Message}"); }
+        try { fresh.EnableControllerNavigation(); } catch (Exception ex) { Log.Write("fastpath: " + $"navigation: {ex.Message}"); }
     }
 
     private static void InvokePrivate(object? target, string name, params object[] args)
@@ -288,7 +288,7 @@ internal static class VisualRebuild
                 }
             }
             string now = $"holders={holders?.Count} model={model} inPlace={inPlace} maxDist={maxDist:F1}";
-            if (now != last) { log("visuals: " + now); last = now; }
+            if (now != last) { Log.Debug("fastpath: visuals: " + now); last = now; }
             stable = inPlace ? stable + 1 : 0;
             if (stable >= 2 && frames >= minFrames) break;
             await ScreenCover.NextFrame();

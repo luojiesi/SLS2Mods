@@ -16,13 +16,48 @@ namespace UndoAndRedo;
 
 /// <summary>
 /// File + console logger. Writes to &lt;Godot user data&gt;/logs/UndoAndRedo.log.
+///
+/// Two levels: <see cref="Write"/> is always on and stays small (one line per undo/redo, warnings, errors,
+/// fallback reasons, startup reflection report); <see cref="Debug"/> is the verbose trace (event dumps,
+/// timings, captures, visual settle, feed progress) and is written only while the file
+/// &lt;user data&gt;/logs/UndoAndRedo.debug exists. The file is re-checked every couple of seconds, so it can be
+/// created mid-session to start tracing without a restart.
 /// </summary>
 internal static class Log
 {
     private static readonly string LogPath = System.IO.Path.Combine(
         OS.GetUserDataDir(), "logs", "UndoAndRedo.log");
+    private static readonly string DebugFlagPath = System.IO.Path.Combine(
+        OS.GetUserDataDir(), "logs", "UndoAndRedo.debug");
 
     private static bool _cleared;
+    private static bool _debugEnabled;
+    private static ulong _debugCheckedAt;
+
+    /// <summary>True while logs/UndoAndRedo.debug exists (checked at most every 2 s).</summary>
+    internal static bool DebugEnabled
+    {
+        get
+        {
+            try
+            {
+                var now = Time.GetTicksMsec();
+                if (_debugCheckedAt == 0 || now - _debugCheckedAt > 2000)
+                {
+                    _debugEnabled = System.IO.File.Exists(DebugFlagPath);
+                    _debugCheckedAt = now;
+                }
+            }
+            catch { }
+            return _debugEnabled;
+        }
+    }
+
+    /// <summary>Verbose trace; dropped unless <see cref="DebugEnabled"/>.</summary>
+    internal static void Debug(string msg)
+    {
+        if (DebugEnabled) Write(msg);
+    }
 
     internal static void Write(string msg)
     {
@@ -65,7 +100,7 @@ internal static class Log
 [ModInitializer("Initialize")]
 public static class UndoAndRedoMod
 {
-    public const string Version = "2.0.0";
+    public const string Version = "2.1.1";
 
     public static void Initialize()
     {
@@ -157,7 +192,7 @@ internal static class Patch_RunManager_InitializeShared
         if (netService is NetSingleplayerGameService inner)
         {
             netService = new RewindNetGameService(inner);
-            Log.Write("Net service wrapped (singleplayer run)");
+            Log.Debug("Net service wrapped (singleplayer run)");
         }
     }
 }

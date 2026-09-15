@@ -206,6 +206,19 @@ UndoAndRedo/
   positions by combat id. Music keeps playing through the rebuild because `NonInteractiveMode` suppresses the
   music controller.
 
+## Logging and debugging
+
+`<user data>/logs/UndoAndRedo.log` is rewritten every session and, by default, stays small: startup reflection
+report, one line per undo/redo (path taken, time, depth), warnings (checksum mismatch, fallback reasons, event
+count divergence) and exceptions. That is what to ask a player for in a bug report.
+
+Create the empty file `<user data>/logs/UndoAndRedo.debug` to turn on the full trace: event dumps, undo target
+choice, per-step timings of the rebuild, memento captures/restores, replay feed progress, settle/visual waits,
+and the separate `logs/UndoAndRedo.fastpath.log`. The flag is re-read every 2 s, so it can be created while the
+game runs, right before reproducing a problem, and deleted afterwards. All other diagnostics are flag files too
+and are off unless present: `UndoAndRedo.fastpath` (`off` / `shadow`), `UndoAndRedo.shadow` (model diffs),
+`UndoAndRedo.capture` (per-frame screenshots while covered), `UndoAndRedo.selftest*` (see below).
+
 ## Self-test
 
 Create an empty file `<user data>/logs/UndoAndRedo.selftest` (user data is `%APPDATA%\SlayTheSpire2`) and
@@ -288,8 +301,8 @@ cp UndoAndRedo/bin/Release/net9.0/UndoAndRedo.dll UndoAndRedo/UndoAndRedo.json \
 ## Maintenance
 
 When a game update breaks things, check `logs/UndoAndRedo.log` first: the "Reflection:" lines at startup name
-any missing member, and every rewind logs the event dump, the chosen target, settle diagnostics and the
-checksum result. The replay loop in `RewindEngine.FeedEvents` should be kept identical to the game's
+any missing member; with `logs/UndoAndRedo.debug` present every rewind logs the event dump, the chosen target,
+settle diagnostics and the checksum result. The replay loop in `RewindEngine.FeedEvents` should be kept identical to the game's
 `NMainMenu.RunReplay`; diff it after each update. Decompile with:
 
 ```bash

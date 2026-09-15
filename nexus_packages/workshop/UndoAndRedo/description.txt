@@ -16,7 +16,7 @@ The mod keeps a memento of the whole combat model before every decision and writ
 [*] Singleplayer only
 [*] Fights started from events cannot be rewound (a toast tells you)
 [*] No configuration, no dependencies, DLL only (game version 0.107 or newer)
-[*] Logs go to %APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log if you want to report a problem
+[*] To report a problem, attach %APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log (it stays short). For a full trace, create an empty file named UndoAndRedo.debug in that logs folder before reproducing the issue
 [/list]
 
 Source: https://github.com/luojiesi/SLS2Mods

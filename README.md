@@ -30,7 +30,7 @@ Combat undo/redo, two mechanisms kept apart:
 - Works across turns (undoing an end-turn rewinds the whole enemy turn), with potions, with card-selection prompts
 - Can be pressed mid-animation or during the enemy turn
 - Unbounded undo depth within a combat; redo stack cleared by any new action
-- Verifies the state checksum after every rewind (and the event count after replays), logs to `%APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log`
+- Verifies the state checksum after every rewind (and the event count after replays), logs to `%APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log` (summary only; create `logs\UndoAndRedo.debug` for the full trace)
 - Built-in end-to-end self-test (see documentation)
 
 **Limitations:**

@@ -79,7 +79,7 @@ internal sealed class ReplayRecorder
                 return;
             }
             Current = new ReplayRecorder(rm);
-            Log.Write("Recorder attached");
+            Log.Debug("Recorder attached");
         }
         catch (Exception ex)
         {
@@ -149,7 +149,7 @@ internal sealed class ReplayRecorder
         foreach (var k in _shadowBefore.Keys.Where(k => k >= keepCount).ToList()) _shadowBefore.Remove(k);
         foreach (var k in _fastBefore.Keys.Where(k => k >= keepCount).ToList()) _fastBefore.Remove(k);
         foreach (var k in _idToRoot.Where(kv => kv.Value >= keepCount).Select(kv => kv.Key).ToList()) _idToRoot.Remove(k);
-        Log.Write($"Recorder: tracking truncated to {keepCount} events");
+        Log.Debug($"Recorder: tracking truncated to {keepCount} events");
     }
 
     /// <summary>Full live combat state snapshot (same structure the game hashes for desync detection).</summary>
@@ -214,7 +214,7 @@ internal sealed class ReplayRecorder
         _shadowBefore.Clear();
         _fastBefore.Clear();
         _lastSeenReplay = Replay;
-        Log.Write($"Recorder: tracking reset ({why})");
+        Log.Debug($"Recorder: tracking reset ({why})");
     }
 
     private void EnsureSameReplay(CombatReplay replay)
@@ -316,7 +316,7 @@ internal sealed class ReplayRecorder
                 if (shadow != null)
                 {
                     _shadowBefore[tracked.EventIndex] = shadow;
-                    Log.Write($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
+                    Log.Debug($"shadow: captured {shadow.Values.Count} values / {shadow.ObjectCount} objects in {shadow.CaptureMs:F1} ms");
                 }
             }
         }
@@ -394,7 +394,7 @@ internal sealed class ReplayRecorder
             if (minViolatingRoot == int.MaxValue)
                 return target;
 
-            Log.Write($"Undo target {target} is not closed (resume depends on event {minViolatingRoot}); moving earlier");
+            Log.Debug($"Undo target {target} is not closed (resume depends on event {minViolatingRoot}); moving earlier");
             limit = minViolatingRoot;
         }
         reason = "could not find a closed prefix";
@@ -447,7 +447,7 @@ internal sealed class ReplayRecorder
 
             if (hasOpen)
             {
-                Log.Write($"Redo segment [{segStart},{segEnd}) contains an unfinished action; dropping it and everything after");
+                Log.Debug($"Redo segment [{segStart},{segEnd}) contains an unfinished action; dropping it and everything after");
                 break;
             }
 
