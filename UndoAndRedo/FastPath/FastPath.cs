@@ -264,6 +264,21 @@ internal static class FastPath
         if (!removed) FastLog($"warning: {decision} was not in any queue after restore");
         if (decision.Id.HasValue && NextIdField != null) NextIdField.SetValue(set, decision.Id.Value);
         RunningProp?.SetValue(rm.ActionExecutor, null);
+
+        // Side effects the game applied when the decision was *enqueued* are inside the memento too and must be
+        // undone by hand: a potion is flagged IsQueued before its UsePotionAction is enqueued, and the potion
+        // popup disables "use" and "discard" while that flag is set.
+        if (decision is UsePotionAction use)
+        {
+            var potion = use.Player.GetPotionAtSlotIndex((int)use.PotionIndex);
+            if (potion != null)
+            {
+                potion.AfterUsageCanceled();
+                try { NRun.Instance?.GlobalUi.TopBar.PotionContainer.OnPotionUseOrDiscardCanceled(potion); }
+                catch (Exception ex) { FastLog($"potion holder re-enable: {ex.Message}"); }
+                FastLog($"cleared queued flag on {potion.Id.Entry}");
+            }
+        }
     }
 
     private static async Task RestoreSfxVolumeSoon()

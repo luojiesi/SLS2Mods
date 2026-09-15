@@ -88,6 +88,8 @@ internal static class SelfTest
         await RewindEngine.WaitUntil(() => readField?.GetValue(menu) != null, 5, "run save read");
         var saveResult = readField?.GetValue(menu);
         var saveData = saveResult?.GetType().GetProperty("SaveData")?.GetValue(saveResult);
+        // logs/UndoAndRedo.selftest.fresh: never touch the player's saved run, always start an unsaved one.
+        if (System.IO.File.Exists(System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "UndoAndRedo.selftest.fresh"))) saveData = null;
         for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
         if (saveData != null)
         {
@@ -326,8 +328,9 @@ internal static class SelfTest
             var holders = holdersField?.GetValue(potions) as System.Collections.IList;
             int shownPotions = holders?.Cast<MegaCrit.Sts2.Core.Nodes.Potions.NPotionHolder>().Count(h => h.Potion != null) ?? -1;
             int modelPotions = me.Potions.Count();
-            bool ok = sameCards && modelAlive == shownAlive && modelPotions == shownPotions;
-            Log.Write($"SELFTEST VISUAL ({when}): hand model={modelHand} shown={shownHand} sameCards={sameCards}; alive model={modelAlive} shown={shownAlive}; potions model={modelPotions} shown={shownPotions}; energy {me.PlayerCombatState.Energy}/{me.PlayerCombatState.MaxEnergy} -> {(ok ? "OK" : "MISMATCH")}");
+            bool stuckPotion = me.Potions.Any(p => p.IsQueued);
+            bool ok = sameCards && modelAlive == shownAlive && modelPotions == shownPotions && !stuckPotion;
+            Log.Write($"SELFTEST VISUAL ({when}): hand model={modelHand} shown={shownHand} sameCards={sameCards}; alive model={modelAlive} shown={shownAlive}; potions model={modelPotions} shown={shownPotions} stuckQueued={stuckPotion}; energy {me.PlayerCombatState.Energy}/{me.PlayerCombatState.MaxEnergy} -> {(ok ? "OK" : "MISMATCH")}");
             return ok;
         }
         catch (Exception ex)
