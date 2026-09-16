@@ -3,7 +3,7 @@
     "name": "Random Number Predictor (随机数预测)",
     "author": "JiesiLuo",
     "description": "Hover a card, potion, pile or event option to see what its random effect will actually do: generated cards, random targets, transformations, upgrades, shuffle order. Inspired by the STS1 mod 随机数预测大师. F8 toggles.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "min_game_version": "0.107.0",
     "has_pck": false,
     "has_dll": true,

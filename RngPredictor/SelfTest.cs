@@ -416,6 +416,37 @@ internal static class SelfTest
                 PredictionManager.OnEventOptionUnfocused(btn);
             }
         }
+        // Arcane Scroll: predict the rare card, obtain the relic, compare with the card added to the deck.
+        try
+        {
+            var scroll = ModelDb.Relic<ArcaneScroll>().ToMutable();
+            var prScroll = Predictors.ForNeowRelic(scroll, me);
+            PLog.Write($"SELFTEST Neow Arcane Scroll prediction: {(prScroll == null ? "(none)" : Describe(prScroll))}");
+            var before = PileType.Deck.GetPile(me).Cards.ToHashSet();
+            await RelicCmd.Obtain(scroll, me);
+            for (int i = 0; i < 30; i++) await NextFrame();
+            var addedScroll = PileType.Deck.GetPile(me).Cards.Where(c => !before.Contains(c)).Select(c => c.Id.Entry).ToList();
+            var predicted = prScroll?.Cards.Select(c => c.Card.Id.Entry).ToList() ?? new List<string>();
+            Check("Arcane Scroll rare card", string.Join(",", addedScroll) == string.Join(",", predicted) && predicted.Count > 0, $"predicted [{string.Join(",", predicted)}] actual [{string.Join(",", addedScroll)}]");
+        }
+        catch (Exception ex) { Check("Arcane Scroll test ran", false, ex.Message); }
+        // Lead Paperweight: 2 colorless cards with an upgrade roll each; the selector records what was offered.
+        try
+        {
+            var weight = ModelDb.Relic<LeadPaperweight>().ToMutable();
+            var prWeight = Predictors.ForNeowRelic(weight, me);
+            PLog.Write($"SELFTEST Neow Lead Paperweight prediction: {(prWeight == null ? "(none)" : Describe(prWeight))}");
+            var rec = new RecordingSelector();
+            using (CardSelectCmd.UseSelector(rec))
+            {
+                await RelicCmd.Obtain(weight, me);
+                for (int i = 0; i < 30; i++) await NextFrame();
+            }
+            var offered = rec.LastOptions.Select(c => c.Id.Entry + (c.IsUpgraded ? "+" : "")).ToList();
+            var predicted = prWeight?.Cards.Select(c => c.Card.Id.Entry + (c.UpgradeLevel > 0 ? "+" : "")).ToList() ?? new List<string>();
+            Check("Lead Paperweight options", string.Join(",", offered) == string.Join(",", predicted) && predicted.Count > 0, $"predicted [{string.Join(",", predicted)}] actual [{string.Join(",", offered)}]");
+        }
+        catch (Exception ex) { Check("Lead Paperweight test ran", false, ex.Message); }
         // Predict New Leaf for the whole deck, then actually obtain it (this opens the transform screen).
         var newLeaf = ModelDb.Relic<NewLeaf>().ToMutable();
         var deckPrediction = Predictors.ForNeowRelic(newLeaf, me);

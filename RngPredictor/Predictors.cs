@@ -8,8 +8,10 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace RngPredictor;
 
@@ -505,7 +507,19 @@ internal static class Predictors
 
     // ───────────────────────────── Neow / event relic options ─────────────────────────────
 
-    private static readonly HashSet<string> NeowTransformRelics = new() { "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice" };
+    private static readonly HashSet<string> NeowTransformRelics = new()
+    {
+        "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice",
+        "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster", "CursedPearl",
+    };
+
+    private static void AddRewardCards(Prediction pr, Player p, int count, CardCreationOptions options, string label)
+    {
+        var cards = Sim.CreateForReward(p, count, options, Sim.Clone(p.PlayerRng.Rewards));
+        foreach (var (card, upgraded) in cards)
+            pr.Cards.Add(new PredCard(card, label, upgraded ? 1 : 0));
+        if (cards.Count == 0) pr.Lines.Add(L.T("没有可生成的牌", "No card can be generated"));
+    }
 
     public static bool IsPredictableNeowRelic(RelicModel relic) => NeowTransformRelics.Contains(relic.GetType().Name);
 
@@ -545,6 +559,53 @@ internal static class Predictors
                     var res = Sim.TransformResult(c, false, r);
                     if (res != null) pr.Cards.Add(new PredCard(res, Name(c) + " →", 0));
                 }
+                break;
+            }
+            case "ArcaneScroll":
+            {
+                pr.Title = relicName + L.T("：会获得的稀有牌", ": the rare card you get");
+                pr.CardScale = 0.45f;
+                var options = new CardCreationOptions(new[] { p.Character.CardPool }, CardCreationSource.Other, CardRarityOddsType.Uniform, c => c.Rarity == CardRarity.Rare).WithFlags(CardCreationFlags.NoUpgradeRoll);
+                int n = 1;
+                try { n = relic.DynamicVars.ContainsKey("Cards") ? relic.DynamicVars["Cards"].IntValue : 1; } catch { }
+                AddRewardCards(pr, p, n, options, "");
+                break;
+            }
+            case "HeftyTablet":
+            {
+                pr.Title = relicName + L.T("：可选的稀有牌", ": the rare cards offered");
+                pr.CardScale = 0.45f;
+                var options = new CardCreationOptions(new[] { p.Character.CardPool }, CardCreationSource.Other, CardRarityOddsType.Uniform, c => c.Rarity == CardRarity.Rare).WithFlags(CardCreationFlags.NoUpgradeRoll);
+                int n = 3;
+                try { n = relic.DynamicVars.ContainsKey("Cards") ? relic.DynamicVars["Cards"].IntValue : 3; } catch { }
+                AddRewardCards(pr, p, n, options, "");
+                pr.Lines.Add(L.T($"{n}选1", $"Choose 1 of {n}"));
+                break;
+            }
+            case "LeadPaperweight":
+            case "LavaRock":
+            {
+                pr.Title = relicName + L.T("：可选的无色牌", ": the colorless cards offered");
+                pr.CardScale = 0.45f;
+                var options = new CardCreationOptions(new[] { ModelDb.CardPool<ColorlessCardPool>() }, CardCreationSource.Other, CardRarityOddsType.RegularEncounter);
+                AddRewardCards(pr, p, 2, options, "");
+                pr.Lines.Add(L.T("2选1", "Choose 1 of 2"));
+                break;
+            }
+            case "PhialHolster":
+            {
+                int n = 2;
+                try { n = relic.DynamicVars.ContainsKey("Potions") ? relic.DynamicVars["Potions"].IntValue : 2; } catch { }
+                var pots = Sim.RandomPotions(p, n, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
+                pr.Title = relicName + L.T("：会获得的药水", ": potions you get");
+                pr.Lines.Add(string.Join(", ", pots.Select(Name)));
+                break;
+            }
+            case "CursedPearl":
+            {
+                var pots = Sim.RandomPotions(p, 1, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
+                pr.Title = relicName + L.T("：会获得的药水", ": potion you get");
+                pr.Lines.Add(string.Join(", ", pots.Select(Name)));
                 break;
             }
             case "LeafyPoultice":

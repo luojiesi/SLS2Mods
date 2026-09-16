@@ -85,6 +85,14 @@ Keyed by the model's C# type name (v0.107.1):
   Astrolabe (every card as the 1st pick, upgraded), Pandora's Box (every basic Strike/Defend, in deck order)
   and Leafy Poultice (first Strike + first Defend, `PlayerRngSet.Transformations`). Neow's option buttons only
   obtain that one relic, so nothing else consumes the stream in between.
+* **Neow relics that generate reward cards / potions**: Arcane Scroll, Hefty Tablet (uniform odds, rare filter,
+  no upgrade roll), Lead Paperweight, Lava Rock (colorless pool, regular-encounter odds, upgrade rolls) go through
+  `Sim.CreateForReward`, a side-effect-free mirror of `CardFactory.CreateForReward`: per card, one Rewards draw for
+  the rarity roll (skipped for Uniform; `RollWithBaseOdds` for relics, the pity offset only applies to encounter
+  rewards), `NextItem` on the pool minus already-picked cards, then one draw for the upgrade roll unless
+  `NoUpgradeRoll`. `Hook.ModifyCardRewardCreationOptions` / `ModifyCardRewardUpgradeOdds` are applied like the
+  game does. A shadow patch on `CreateForReward` verifies this on every real card reward too. Phial Holster and
+  Cursed Pearl reuse the potion simulation.
 * **Event options with random outcomes** (`Predictors.ForEventOption`, keyed by event type + option text key):
   Endless Conveyor "Observe the chef" / "Spicy Snappy" (random upgrade: `ev.Rng.NextItem(deck.Where(IsUpgradable))`
   — with a fully upgraded deck the game upgrades nothing and the overlay says so), "Suspicious Condiment"

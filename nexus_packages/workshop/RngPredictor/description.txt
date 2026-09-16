@@ -7,7 +7,7 @@ Hover over anything with a random effect and see what it will actually do before
 [*] [b]Cards in hand[/b]: the cards a card will generate or offer (Discovery, Infernal Blade, Quasar, Jackpot, Metamorphosis, ...), the card it will pick from your hand or piles (True Grit, Cinder, Thrash, Seeker Strike, Beat Down, Catastrophe, ...), the top card Havoc / Cascade will play, which enemy each hit of Sword Boomerang, Ricochet, Flak Cannon, Volley, Bouncing Flask... will land on, Chaos orbs, Alchemize potions
 [*] [b]Potions[/b]: Attack / Skill / Power / Colorless Potion options, Cosmic Concoction, Orobic Acid, Entropic Brew, Distilled Chaos, Snecko Oil (draws and every new cost)
 [*] [b]Draw / discard pile buttons[/b]: the draw pile order after the next reshuffle, now and after your hand is discarded
-[*] [b]Neow[/b]: hover New Leaf, Astrolabe, Pandora's Box or Leafy Poultice and see what your cards would become, without picking the option
+[*] [b]Neow[/b]: hover an option and see its result without picking it: what your cards would become (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice), the rare card Arcane Scroll gives, the cards Hefty Tablet / Lead Paperweight / Lava Rock will offer (upgrade rolls included), the potions from Phial Holster and Cursed Pearl
 [*] [b]Events[/b]: hover a "transform a card" option (Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove, Trial, Endless Conveyor) to see what each deck card would become; Endless Conveyor's random upgrade and random potion dishes; on any "choose a card to transform" screen, hover a card to see its result
 [/list]
 

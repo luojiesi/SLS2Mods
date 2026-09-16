@@ -114,7 +114,7 @@ stream (`new Rng(seed, counter)`), so the answer is the real one, not a probabil
 | A potion | Attack / Skill / Power / Colorless Potion options, Cosmic Concoction, Orobic Acid, Entropic Brew potions, Snecko Oil draws and every card's new cost |
 | The draw or discard pile | the draw pile order after the next reshuffle (top first), now and after the hand is discarded |
 | A deck card on a "choose a card to transform" screen (events, New Leaf, Astrolabe) | what it becomes as the 1st / 2nd / ... transformed card |
-| A Neow option that transforms cards (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice) | what every eligible deck card would become, before you pick it |
+| A Neow option (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice, Arcane Scroll, Hefty Tablet, Lead Paperweight, Lava Rock, Phial Holster, Cursed Pearl) | what every eligible deck card would become, the reward cards you will be given or offered (upgrade rolls included), the potions you get, before you pick it |
 | An event option with a random outcome (Endless Conveyor's random upgrade / potion / transform dishes, the transform options of Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove, Trial) | which card gets upgraded, which potion you get, what each deck card would become |
 
 **F8** toggles the mod. Predictions refresh a few times per second while hovered, so if a relic or power consumes

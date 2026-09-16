@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.CardPools;
+using MegaCrit.Sts2.Core.Odds;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -146,6 +147,90 @@ internal static class Sim
             draw.RemoveAt(0);
         }
         return result;
+    }
+
+    /// <summary>
+    /// Mirror of CardFactory.CreateForReward(player, count, options) without creating cards or touching the
+    /// rarity pity counter. Everything draws from the Rewards stream: rarity roll (unless Uniform), card pick,
+    /// upgrade roll (unless NoUpgradeRoll), in that order per card.
+    /// </summary>
+    public static List<(CardModel card, bool upgraded)> CreateForReward(Player p, int count, CardCreationOptions options, Rng rewards)
+    {
+        var results = new List<(CardModel, bool)>();
+        var blacklist = new List<CardModel>();
+        var oddsState = p.PlayerOdds.CardRarity;
+        float pity = oddsState.CurrentValue;
+        decimal upgradeScaling = 0m;
+        try { upgradeScaling = (decimal)(HarmonyLib.AccessTools.Property(typeof(CardFactory), "UpgradedCardOddScaling")?.GetValue(null) ?? 0m); } catch { }
+        for (int i = 0; i < count; i++)
+        {
+            var opts = MegaCrit.Sts2.Core.Hooks.Hook.ModifyCardRewardCreationOptions(p.RunState, p, options);
+            var pool = FilterForPlayerCount(p.RunState, opts.GetPossibleCards(p).Except(blacklist).ToList()).ToArray();
+            IEnumerable<CardModel> items;
+            if (opts.RarityOdds == CardRarityOddsType.Uniform)
+            {
+                items = pool.Where(c => c.Rarity != CardRarity.Basic && c.Rarity != CardRarity.Ancient);
+            }
+            else
+            {
+                var allowed = pool.Select(c => c.Rarity).ToHashSet();
+                bool force = opts.Flags.HasFlag(CardCreationFlags.ForceRarityOddsChange)
+                             || (opts.Source == CardCreationSource.Encounter && (uint)(opts.RarityOdds - 1) <= 2u);
+                float roll = rewards.NextFloat();
+                CardRarity rarity;
+                if (force)
+                {
+                    float offset = opts.RarityOdds == CardRarityOddsType.BossEncounter ? 0f : pity;
+                    float rareOdds = BaseOdds(opts.RarityOdds, CardRarity.Rare) + offset;
+                    rarity = roll < rareOdds ? CardRarity.Rare
+                        : roll < BaseOdds(opts.RarityOdds, CardRarity.Uncommon) + rareOdds ? CardRarity.Uncommon : CardRarity.Common;
+                    pity = rarity == CardRarity.Rare ? -0.05f : System.Math.Min(pity + oddsState.RarityGrowth, 0.4f);
+                }
+                else
+                {
+                    rarity = roll < BaseOdds(opts.RarityOdds, CardRarity.Rare) ? CardRarity.Rare
+                        : roll < BaseOdds(opts.RarityOdds, CardRarity.Uncommon) ? CardRarity.Uncommon : CardRarity.Common;
+                }
+                var original = rarity;
+                while (!allowed.Contains(rarity) && rarity != CardRarity.None)
+                {
+                    rarity = rarity.GetNextHighestRarityWithWrapping();
+                    if (rarity == original) { rarity = CardRarity.None; break; }
+                }
+                if (rarity == CardRarity.None) break;
+                var selected = rarity;
+                items = pool.Where(c => c.Rarity == selected);
+            }
+            var card = rewards.NextItem(items);
+            if (card == null) break;
+            blacklist.Add(card.CanonicalInstance ?? card);
+            bool upgraded = false;
+            if (!opts.Flags.HasFlag(CardCreationFlags.NoUpgradeRoll))
+            {
+                decimal num = (decimal)rewards.NextFloat();
+                if (card.IsUpgradable)
+                {
+                    decimal odds = 0m;
+                    if (card.Rarity != CardRarity.Rare) odds += (decimal)p.RunState.CurrentActIndex * upgradeScaling;
+                    odds = MegaCrit.Sts2.Core.Hooks.Hook.ModifyCardRewardUpgradeOdds(p.RunState, p, card, odds);
+                    upgraded = num <= odds;
+                }
+            }
+            results.Add((card, upgraded));
+        }
+        return results;
+    }
+
+    private static float BaseOdds(CardRarityOddsType type, CardRarity rarity)
+    {
+        return type switch
+        {
+            CardRarityOddsType.EliteEncounter => rarity switch { CardRarity.Common => CardRarityOdds.EliteCommonOdds, CardRarity.Uncommon => 0.4f, _ => CardRarityOdds.EliteRareOdds },
+            CardRarityOddsType.BossEncounter => rarity switch { CardRarity.Rare => 1f, _ => 0f },
+            CardRarityOddsType.Shop => rarity switch { CardRarity.Common => CardRarityOdds.ShopCommonOdds, CardRarity.Uncommon => 0.37f, _ => CardRarityOdds.ShopRareOdds },
+            CardRarityOddsType.RegularEncounter => rarity switch { CardRarity.Common => CardRarityOdds.regularCommonOdds, CardRarity.Uncommon => 0.37f, _ => CardRarityOdds.RegularRareOdds },
+            _ => 0.33f,
+        };
     }
 
     /// <summary>Mirror of CardFactory.CreateRandomCardForTransform without creating the card.</summary>

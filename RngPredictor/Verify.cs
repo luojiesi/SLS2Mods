@@ -82,6 +82,29 @@ internal static class Verify_GetDistinctForCombat
     }
 }
 
+[HarmonyPatch(typeof(CardFactory), nameof(CardFactory.CreateForReward), new[] { typeof(Player), typeof(int), typeof(CardCreationOptions) })]
+internal static class Verify_CreateForReward
+{
+    [HarmonyPrefix]
+    public static void Prefix(Player player, int cardCount, CardCreationOptions options, out string __state)
+    {
+        __state = "";
+        try
+        {
+            var rng = Sim.Clone(options.RngOverride ?? player.PlayerRng.Rewards);
+            __state = string.Join(",", Sim.CreateForReward(player, cardCount, options, rng).Select(x => x.card.Id.Entry + (x.upgraded ? "+" : "")));
+        }
+        catch (Exception ex) { __state = "ERROR " + ex.Message; }
+    }
+
+    [HarmonyPostfix]
+    public static void Postfix(IEnumerable<CardCreationResult> __result, string __state)
+    {
+        try { Verify.Report("CreateForReward", __state, string.Join(",", __result.Select(r => r.Card.Id.Entry + (r.Card.IsUpgraded ? "+" : "")))); }
+        catch (Exception ex) { PLog.Write($"verify postfix failed: {ex.Message}"); }
+    }
+}
+
 [HarmonyPatch(typeof(CardFactory), nameof(CardFactory.GetForCombat))]
 internal static class Verify_GetForCombat
 {
