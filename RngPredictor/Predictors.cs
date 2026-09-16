@@ -682,7 +682,9 @@ internal static class Predictors
         return ev.GetType().Name switch
         {
             "ThisOrThat" when suffix == "ORNATE" => 1,
-            "RanwidTheElder" when suffix is "GOLD" or "POTION" or "RELIC" => 1,
+            "RanwidTheElder" when suffix is "GOLD" or "POTION" => 1,
+            "RanwidTheElder" when suffix == "RELIC" => 2, // trade one relic, get two
+
             "UnrestSite" when suffix == "KILL" => 1,
             "LuminousChoir" when suffix == "OFFER_TRIBUTE" => 1,
             "Trial" when textKey.EndsWith("MERCHANT.options.GUILTY") => 1,
