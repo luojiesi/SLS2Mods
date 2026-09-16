@@ -172,7 +172,6 @@ STS2Mods/
     UndoAndRedoMod.cs       Entry point, input handling, Harmony patches
     ReplayRecorder.cs       Tracks the game's replay event stream, action ids, checksums
     RewindEngine.cs         Rebuild + replay orchestration (undo/redo)
-    RewindNetGameService.cs Net service that reports Replay while feeding events
     SelfTest.cs             Automated end-to-end test
     UndoAndRedo.json        Manifest (DLL only)
     DOCUMENTATION.md        Design documentation

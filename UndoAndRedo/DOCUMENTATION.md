@@ -49,7 +49,7 @@ CombatReplayWriter        for each recorded event:                Left Arrow
   serializableRun           • is the action still open?             2. fade out, RunManager.CleanUp()
                             • checksum before player decisions      3. RunState.FromSerializable(save)
                                                                     4. InitializeShared/RunLobby/SavedRun
-                                                                       with RewindNetGameService
+                                                                       (Type reports Replay while feeding)
                                                                     5. Launch, NRun.Create, GenerateMap,
                                                                        fast-forward ids, LoadIntoLatestMapCoord
                                                                     6. wait for play phase of turn 1
@@ -141,10 +141,10 @@ redo.
 If anything throws after step 2, the current room is made safe (`NCombatUi._state`) and the replay path takes
 over — it rebuilds everything from the save and does not depend on the live state.
 
-**Why redo needs the wrapped net service everywhere**: redo feeds recorded events into the live game in replay
-mode. With the game's own `NetSingleplayerGameService` (`Type == Singleplayer`) the combat manager would still
-enqueue its own `ReadyToBeginEnemyTurnAction` next to the recorded one (double enemy turn). Hence
-`Patch_RunManager_InitializeShared` wraps the service for every singleplayer run, not only rebuilt ones.
+**Why the net service must report Replay while feeding**: redo feeds recorded events into the live game in
+replay mode. If the service still reported `Singleplayer`, the combat manager would enqueue its own
+`ReadyToBeginEnemyTurnAction` next to the recorded one (double enemy turn). `Patch_NetSingleplayerGameService_Type`
+makes the game's own service report `Replay` while `ReplayModeActive`, for every singleplayer run.
 
 Known gaps of the fast path (all fall back to replay or are cosmetic): decisions made while another action was
 still executing (queued card plays) get no memento; Defect orbs are placed best-effort (not tested); the old
@@ -157,7 +157,6 @@ UndoAndRedo/
   UndoAndRedoMod.cs         Entry point, logging, toast, Harmony patches
   ReplayRecorder.cs         Event/id/open-action tracking, checksums, mementos, boundary + segment analysis
   RewindEngine.cs           Undo/redo orchestration: fast path dispatch, teardown, rebuild, feed, settle, verify
-  RewindNetGameService.cs   Singleplayer net service whose Type switches to Replay while feeding
   ShadowSnapshot.cs         Research tool: path→value model diff on a worker thread (logs/UndoAndRedo.shadow)
   FastPath/FastPath.cs      Mode file, capture validity, TryFastUndo, queue detach, shadow trial
   FastPath/ModelSnapshot.cs In-place memento of an object graph (capture/restore)
@@ -174,7 +173,7 @@ UndoAndRedo/
 | `NGame._Input` | prefix | Left/Right arrow → undo/redo |
 | `CombatReplayWriter.WriteReplay` | prefix | Skip the replay disk write during our own teardown |
 | `NHandCardHolder.AnimPosition/AnimAngle/AnimScale` | prefix | Move hand cards instantly while replaying or while the fast path rebuilds the hand. Their per-frame `Lerp(target, delta*k)` has no weight clamp and diverges to infinity under any time scale > 1 (that was the "flashing screen" bug: a card frame stretched across the whole screen) |
-| `RunManager.InitializeShared` | prefix | Wrap the game's singleplayer net service in `RewindNetGameService` for every run (see Fast path) |
+| `NetSingleplayerGameService.Type` | postfix (getter) | Report `Replay` while events are being fed. A patch instead of a wrapper class: a class implementing `INetGameService` stopped the mod from loading on the beta branch when the interface gained `LocalVersion` |
 | `PreloadManager.LoadRoomCombatAssets` | prefix | Skip the room asset preload (already resident) during replay |
 | `NTransition.RoomFadeIn` | prefix | Suppress the game's fade-in while we rebuild behind a black screen |
 | `RunManager.Launch` | postfix | Attach the recorder to the new run's queue/executor/writer |

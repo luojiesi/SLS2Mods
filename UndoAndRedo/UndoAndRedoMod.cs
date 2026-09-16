@@ -100,7 +100,7 @@ internal static class Log
 [ModInitializer("Initialize")]
 public static class UndoAndRedoMod
 {
-    public const string Version = "2.2.0";
+    public const string Version = "2.2.1";
 
     public static void Initialize()
     {
@@ -179,21 +179,20 @@ internal static class Patch_NGame_Input
 }
 
 /// <summary>
-/// Every singleplayer run gets the switchable net service, not only runs rebuilt by the replay path. Redo feeds
-/// recorded events into the live game in replay mode; with the game's own service (Type == Singleplayer) the
-/// combat manager would still enqueue its own turn-transition action next to the recorded one.
+/// While recorded events are being fed, the singleplayer net service reports <c>Replay</c>: the synchronizers
+/// then stop enqueuing live requests (e.g. the combat manager's own turn-transition action), selection screens
+/// read the recorded choice, and turn-end bookkeeping comes from the stream. Done as a patch on the game's own
+/// service class rather than by wrapping it in a class that implements <c>INetGameService</c>: a wrapper stops
+/// the whole mod from loading as soon as a game update adds a member to that interface (this happened on the
+/// beta branch with <c>LocalVersion</c>).
 /// </summary>
-[HarmonyPatch(typeof(RunManager), "InitializeShared")]
-internal static class Patch_RunManager_InitializeShared
+[HarmonyPatch(typeof(NetSingleplayerGameService), "Type", MethodType.Getter)]
+internal static class Patch_NetSingleplayerGameService_Type
 {
-    [HarmonyPrefix]
-    public static void Prefix(ref INetGameService netService)
+    [HarmonyPostfix]
+    public static void Postfix(ref NetGameType __result)
     {
-        if (netService is NetSingleplayerGameService inner)
-        {
-            netService = new RewindNetGameService(inner);
-            Log.Debug("Net service wrapped (singleplayer run)");
-        }
+        if (RewindEngine.ReplayModeActive) __result = NetGameType.Replay;
     }
 }
 

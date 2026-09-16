@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
@@ -411,9 +412,10 @@ internal static class RewindEngine
             _ownRebuild = false;
             Log.Debug($"{T()} teardown complete");
 
-            // 2. Rebuild the run from the save taken at map-point entry, with our switchable net service.
+            // 2. Rebuild the run from the save taken at map-point entry. The game's singleplayer service is used;
+            //    its Type reports Replay while ReplayModeActive (see Patch_NetSingleplayerGameService_Type).
             var runState = RunState.FromSerializable(header.Save);
-            var service = new RewindNetGameService();
+            var service = new NetSingleplayerGameService();
             SetUpSavedRun(rm, runState, header.Save, service);
             rm.CombatStateSynchronizer.IsDisabled = true;
             game.ReactionContainer.InitializeNetworking(service);
