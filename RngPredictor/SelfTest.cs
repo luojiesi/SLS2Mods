@@ -112,6 +112,10 @@ internal static class SelfTest
         try { await NeowTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: Neow test failed: {ex}"); Check("Neow test ran", false, ex.Message); }
 
+        // ── 0a. This or That: predict the random relic, pick "ornate", compare ──
+        try { await RelicPullTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: relic pull test failed: {ex}"); Check("Relic pull test ran", false, ex.Message); }
+
         // ── 0b. Endless Conveyor: hover the options, then "observe the chef" (random upgrade) ──
         try { await ConveyorTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: conveyor test failed: {ex}"); Check("Conveyor test ran", false, ex.Message); }
@@ -162,7 +166,7 @@ internal static class SelfTest
         var me = rs.Players[0];
         PLog.Write($"SELFTEST: combat started, hand = {string.Join(",", me.PlayerCombatState!.Hand.Cards.Select(c => c.Id.Entry))}, enemies = {string.Join(",", me.Creature.CombatState!.HittableEnemies.Select(e => e.Name))}");
 
-        await PlayerCmd.GainEnergy(20, me);
+        // (energy stays at 3 here so an X-cost top card played by Havoc cannot wipe the fight)
         // Havoc first (hand limit 10): predict the top card of the draw pile, play, and check it was the one exhausted.
         var havoc = await AddToHand<Havoc>(rs, me);
         if (havoc != null)
@@ -498,6 +502,38 @@ internal static class SelfTest
         try { await obtainTask; } catch (Exception ex) { PLog.Write($"SELFTEST: obtain task: {ex.Message}"); }
         var added = PileType.Deck.GetPile(me).Cards.Where(c => !deckBefore.Contains(c)).Select(c => c.Id.Entry).ToList();
         Check("New Leaf result", added.Count == 1 && added[0] == screenPredicted, $"predicted [{screenPredicted}] actual [{string.Join(",", added)}]");
+    }
+
+    private static async Task RelicPullTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        var eventModel = ModelDb.AllEvents.FirstOrDefault(e => e.Id.Entry == "THIS_OR_THAT");
+        if (eventModel == null) { PLog.Write("SELFTEST: THIS_OR_THAT not found; skipping"); return; }
+        PLog.Write("SELFTEST: entering THIS_OR_THAT");
+        rs.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Unknown, MegaCrit.Sts2.Core.Rooms.RoomType.Event, eventModel.Id);
+        await rm.EnterRoom(new EventRoom(eventModel));
+        if (!await WaitUntil(() => (NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 1, 30, "this-or-that options")) return;
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var buttons = NEventRoom.Instance!.Layout!.OptionButtons.ToList();
+        var ornate = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("ORNATE"));
+        if (ornate == null) { Check("this-or-that ornate option present", false, string.Join(",", buttons.Select(b => b.Option?.TextKey))); return; }
+        PredictionManager.OnEventOptionFocused(ornate);
+        for (int i = 0; i < 6; i++) await NextFrame();
+        var ev = AccessTools.Field(typeof(NEventRoom), "_event")?.GetValue(NEventRoom.Instance) as EventModel;
+        var pr = ev != null ? Predictors.ForEventOption(ev, ornate.Option!.TextKey, me) : null;
+        PLog.Write($"SELFTEST this-or-that ornate prediction: {(pr == null ? "(none)" : Describe(pr))} overlayShowing={PredictionManager.OverlayShowing}");
+        Shot("00_this_or_that");
+        PredictionManager.OnEventOptionUnfocused(ornate);
+        var peek = Sim.PeekRelicsFromFront(me, 1).FirstOrDefault().relic;
+        var relicsBefore = me.Relics.ToList();
+        rm.EventSynchronizer.ChooseLocalOption(buttons.IndexOf(ornate));
+        if (!await WaitUntil(() => me.Relics.Count > relicsBefore.Count, 30, "relic obtained")) { Check("This or That relic", false, "timeout"); return; }
+        for (int i = 0; i < 60; i++) await NextFrame();
+        var gained = me.Relics.Where(r => !relicsBefore.Contains(r)).Select(r => r.Id.Entry).ToList();
+        Check("This or That relic", peek != null && gained.Count == 1 && gained[0] == peek.Id.Entry, $"predicted [{peek?.Id.Entry}] actual [{string.Join(",", gained)}]");
+        for (int i = 0; i < 30; i++) await NextFrame();
+        try { if ((NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 0) rm.EventSynchronizer.ChooseLocalOption(0); } catch (Exception ex) { PLog.Write($"SELFTEST: leaving this-or-that: {ex.Message}"); }
+        for (int i = 0; i < 60; i++) await NextFrame();
     }
 
     private static async Task ConveyorTest(RunManager rm, IRunState rs)

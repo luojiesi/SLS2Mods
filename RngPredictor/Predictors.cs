@@ -510,7 +510,7 @@ internal static class Predictors
     private static readonly HashSet<string> NeowTransformRelics = new()
     {
         "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice",
-        "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster", "CursedPearl",
+        "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster", "CursedPearl", "LargeCapsule",
     };
 
     private static void AddRewardCards(Prediction pr, Player p, int count, CardCreationOptions options, string label)
@@ -601,6 +601,14 @@ internal static class Predictors
                 pr.Lines.Add(string.Join(", ", pots.Select(Name)));
                 break;
             }
+            case "LargeCapsule":
+            {
+                int n = 2;
+                try { n = relic.DynamicVars.ContainsKey("Relics") ? relic.DynamicVars["Relics"].IntValue : 2; } catch { }
+                pr.Title = relicName + L.T("：会获得的遗物", ": relics you get");
+                AddRelicPulls(pr, p, n);
+                break;
+            }
             case "CursedPearl":
             {
                 var pots = Sim.RandomPotions(p, 1, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
@@ -667,8 +675,38 @@ internal static class Predictors
     }
 
     /// <summary>Event options whose outcome is random and predictable from the event's own RNG (or the player's).</summary>
+    /// <summary>Event options that grant "a random relic" = the next relic pulled from the front of the grab bag.</summary>
+    private static int RelicPullCount(EventModel ev, string textKey)
+    {
+        string suffix = OptionSuffix(textKey);
+        return ev.GetType().Name switch
+        {
+            "ThisOrThat" when suffix == "ORNATE" => 1,
+            "RanwidTheElder" when suffix is "GOLD" or "POTION" or "RELIC" => 1,
+            "UnrestSite" when suffix == "KILL" => 1,
+            "LuminousChoir" when suffix == "OFFER_TRIBUTE" => 1,
+            "Trial" when textKey.EndsWith("MERCHANT.options.GUILTY") => 1,
+            _ => 0,
+        };
+    }
+
+    private static void AddRelicPulls(Prediction pr, Player p, int count)
+    {
+        var pulls = Sim.PeekRelicsFromFront(p, count);
+        var names = new List<string>();
+        foreach (var (relic, note) in pulls)
+        {
+            if (relic == null) { names.Add(L.T("（遗物池将重新填充，无法预测）", "(relic pool refills, cannot predict)")); continue; }
+            string n;
+            try { n = relic.Title.GetFormattedText(); } catch { n = relic.Id.Entry; }
+            names.Add(n);
+        }
+        pr.Lines.Add(L.T("获得遗物: ", "Relic: ") + string.Join(", ", names));
+    }
+
     public static bool HasEventOptionPredictor(EventModel ev, string textKey)
     {
+        if (RelicPullCount(ev, textKey) > 0) return true;
         string suffix = OptionSuffix(textKey);
         return ev.GetType().Name switch
         {
@@ -688,6 +726,15 @@ internal static class Predictors
         string evName = ev.GetType().Name;
         var deck = PileType.Deck.GetPile(p).Cards.ToList();
         var pr = new Prediction();
+        // "Obtain a random relic": the next relic from the front of the grab bag.
+        int relicPulls = RelicPullCount(ev, textKey);
+        if (relicPulls > 0)
+        {
+            pr.Title = L.T("随机遗物 → 会拿到", "Random relic → you get");
+            AddRelicPulls(pr, p, relicPulls);
+            return pr;
+        }
+
         Rng evRng;
         try { evRng = ev.Rng; } catch { return null; }
         if (evRng == null) return null;

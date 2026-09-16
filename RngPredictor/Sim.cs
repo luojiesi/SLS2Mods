@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Entities.Potions;
+using MegaCrit.Sts2.Core.Entities.Relics;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Factories;
 using MegaCrit.Sts2.Core.Models;
@@ -231,6 +232,60 @@ internal static class Sim
             CardRarityOddsType.RegularEncounter => rarity switch { CardRarity.Common => CardRarityOdds.regularCommonOdds, CardRarity.Uncommon => 0.37f, _ => CardRarityOdds.RegularRareOdds },
             _ => 0.33f,
         };
+    }
+
+    /// <summary>
+    /// Mirror of RelicFactory.PullNextRelicFromFront(player) repeated <paramref name="count"/> times, without
+    /// touching the grab bag: one Rewards draw for the rarity (&lt;0.5 common, &lt;0.83 uncommon, else rare), then the
+    /// first allowed relic of that rarity's pre-shuffled deque (falling through common → uncommon → rare → the
+    /// multiplayer fallback deque → Circlet). A deque that is empty and would be refilled cannot be predicted.
+    /// </summary>
+    public static List<(RelicModel? relic, string note)> PeekRelicsFromFront(Player p, int count)
+    {
+        var results = new List<(RelicModel?, string)>();
+        var bag = p.RelicGrabBag;
+        var deques = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, System.Collections.Generic.Dictionary<RelicRarity, List<RelicModel>>>("_deques")(bag);
+        var fallback = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, List<RelicModel>>("_mpFallbackDequeue")(bag);
+        bool refreshAllowed = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, bool>("_refreshAllowed")(bag);
+        var runState = p.RunState;
+        // Work on allowed-only copies so nothing in the real bag is touched.
+        var copies = new System.Collections.Generic.Dictionary<RelicRarity, List<RelicModel>>();
+        foreach (var (rarity, list) in deques)
+            copies[rarity] = list.Where(r => r.IsAllowed(runState)).ToList();
+        var fallbackCopy = fallback.Where(r => r.IsAllowed(runState)).ToList();
+        var rewards = Clone(p.PlayerRng.Rewards);
+        for (int i = 0; i < count; i++)
+        {
+            float f = rewards.NextFloat();
+            var rarity = f < 0.5f ? RelicRarity.Common : (f < 0.83f ? RelicRarity.Uncommon : RelicRarity.Rare);
+            List<RelicModel>? list = copies.TryGetValue(rarity, out var l) ? l : new List<RelicModel>();
+            if (list.Count == 0 && refreshAllowed)
+            {
+                results.Add((null, "pool refills"));
+                break;
+            }
+            while (list != null && list.Count == 0)
+            {
+                rarity = rarity switch
+                {
+                    RelicRarity.Shop => RelicRarity.Common,
+                    RelicRarity.Common => RelicRarity.Uncommon,
+                    RelicRarity.Uncommon => RelicRarity.Rare,
+                    _ => RelicRarity.None,
+                };
+                list = rarity == RelicRarity.None ? null : (copies.TryGetValue(rarity, out var l2) ? l2 : new List<RelicModel>());
+            }
+            if (list == null && fallbackCopy.Count > 0) list = fallbackCopy;
+            if (list == null || list.Count == 0)
+            {
+                results.Add((RelicFactory.FallbackRelic, ""));
+                continue;
+            }
+            var relic = list[0];
+            list.RemoveAt(0);
+            results.Add((relic, ""));
+        }
+        return results;
     }
 
     /// <summary>Mirror of CardFactory.CreateRandomCardForTransform without creating the card.</summary>

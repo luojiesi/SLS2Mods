@@ -93,6 +93,13 @@ Keyed by the model's C# type name (v0.107.1):
   `NoUpgradeRoll`. `Hook.ModifyCardRewardCreationOptions` / `ModifyCardRewardUpgradeOdds` are applied like the
   game does. A shadow patch on `CreateForReward` verifies this on every real card reward too. Phial Holster and
   Cursed Pearl reuse the potion simulation.
+* **"Obtain a random relic"** (`Sim.PeekRelicsFromFront`): `RelicFactory.PullNextRelicFromFront` rolls the rarity
+  with one Rewards draw (<0.5 common, <0.83 uncommon, else rare) and takes the first allowed relic of that
+  rarity's deque in the player's `RelicGrabBag`, which was shuffled once at run start; the mod peeks at
+  allowed-only copies of the private deques (via Harmony field access) with the same fall-through
+  (common → uncommon → rare → multiplayer fallback → Circlet). Used for This or That, Ranwid the Elder, Unrest
+  Site, Luminous Choir, the Trial's merchant and Neow's Large Capsule. An empty deque that the game would refill
+  is reported as unpredictable instead of guessed.
 * **Event options with random outcomes** (`Predictors.ForEventOption`, keyed by event type + option text key):
   Endless Conveyor "Observe the chef" / "Spicy Snappy" (random upgrade: `ev.Rng.NextItem(deck.Where(IsUpgradable))`
   — with a fully upgraded deck the game upgrades nothing and the overlay says so), "Suspicious Condiment"
