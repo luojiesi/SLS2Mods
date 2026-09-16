@@ -1,0 +1,33 @@
+Start every run with a fully upgraded deck and all three egg relics, so every card you see is the upgraded version.
+
+每局开始时初始牌组全部升级，并自带三个蛋遗物，之后你看到的每一张牌都是升级版。
+
+[h2]What it does[/h2]
+[list]
+[*] Upgrades your entire starting deck at the start of each run
+[*] Grants Frozen Egg, Molten Egg and Toxic Egg, so every Attack, Skill and Power you pick up mid-run is upgraded automatically
+[*] Removes the three eggs from the relic pool so you never find duplicates
+[/list]
+
+[h2]功能[/h2]
+[list]
+[*] 每局开始时升级整副初始牌组
+[*] 直接给你冰冻蛋、熔岩蛋和毒蛋，之后拿到的攻击牌、技能牌、能力牌自动升级
+[*] 把这三个蛋从遗物池里移除，不会再重复拿到
+[/list]
+
+[h2]Notes[/h2]
+[list]
+[*] Singleplayer, no configuration, no dependencies
+[*] Uses the game's built-in mod loader (DLL only)
+[*] Game version 0.107 or newer
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*] 单人模式，无需配置，无依赖
+[*] 使用游戏自带的 mod 加载器（只有 DLL）
+[*] 游戏版本 0.107 及以上
+[/list]
+
+Source: https://github.com/luojiesi/SLS2Mods

@@ -7,9 +7,19 @@ Hover over anything with a random effect and see what it will actually do before
 [*] [b]Cards in hand[/b]: the cards a card will generate or offer (Discovery, Infernal Blade, Quasar, Jackpot, Metamorphosis, ...), the card it will pick from your hand or piles (True Grit, Cinder, Thrash, Seeker Strike, Beat Down, Catastrophe, ...), the top card Havoc / Cascade will play, which enemy each hit of Sword Boomerang, Ricochet, Flak Cannon, Volley, Bouncing Flask... will land on, Chaos orbs, Alchemize potions
 [*] [b]Potions[/b]: Attack / Skill / Power / Colorless Potion options, Cosmic Concoction, Orobic Acid, Entropic Brew, Distilled Chaos, Snecko Oil (draws and every new cost)
 [*] [b]Draw / discard pile buttons[/b]: the draw pile order after the next reshuffle, now and after your hand is discarded
-[*] [b]Neow[/b]: hover an option and see its result without picking it: what your cards would become (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice), the rare card Arcane Scroll gives, the cards Hefty Tablet / Lead Paperweight / Lava Rock will offer (upgrade rolls included), the potions from Phial Holster and Cursed Pearl
-[*] [b]Random relics[/b]: "obtain a random relic" options (This or That, Ranwid the Elder, Unrest Site, Luminous Choir, the Trial's merchant, Neow's Large Capsule) show which relic you will actually get: the relic pool is shuffled at the start of the run, so the next one is known
+[*] [b]Neow[/b]: hover an option and see its result without picking it: what your cards would become (New Leaf, Astrolabe, Pandora's Box, Leafy Poultice), the rare card Arcane Scroll gives, the cards Hefty Tablet / Lead Paperweight / Lava Rock will offer (upgrade rolls included), the potions from Phial Holster and Cursed Pearl, the relics from Large Capsule
+[*] [b]Random relics[/b]: "obtain a random relic" options (This or That, Ranwid the Elder, Unrest Site, Luminous Choir, the Trial's merchant) and the rest site's Dig show which relic you will actually get: the relic pool is shuffled at the start of the run, so the next one is known
 [*] [b]Events[/b]: hover a "transform a card" option (Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove, Trial, Endless Conveyor) to see what each deck card would become; Endless Conveyor's random upgrade and random potion dishes; on any "choose a card to transform" screen, hover a card to see its result
+[/list]
+
+[h2]能预测什么[/h2]
+[list]
+[*] [b]手牌[/b]：会生成或让你选的牌（发现、地狱之刃、类星体、大满贯、羽化……）、会从手牌或牌堆里随机选中的牌（坚毅、余烬、鞭打、寻觅打击、痛殴、灾变……）、破灭 / 层叠会打出的抽牌堆顶牌、飞剑回旋镖、弹射、高射炮、齐射、弹跳药瓶等每一击打到哪个敌人、混沌的充能球、炼金术的药水
+[*] [b]药水[/b]：攻击 / 技能 / 能力 / 无色药水的三选一、宇宙调和剂、奥罗比酸、熵药剂、蒸馏混沌、蛇油（抽到的牌和每张牌的新费用）
+[*] [b]抽牌堆 / 弃牌堆按钮[/b]：下次洗牌后的抽牌堆顺序（现在洗、以及回合结束弃掉手牌后再洗）
+[*] [b]涅奥[/b]：悬停选项、不用选就能看结果：牌会变成什么（新叶、星盘、潘多拉魔盒、药膏）、奥数卷轴给的稀有牌、厚重石板 / 铅镇纸 / 熔岩石会提供的牌（含是否升级）、药瓶皮套和诅咒珍珠给的药水、大胶囊给的遗物
+[*] [b]随机遗物[/b]："获得一个随机遗物"的选项（这个还是那个、拉恩威德长老、不安之地、光辉唱诗班、审判的商人）和休息点的挖掘，直接显示会拿到哪个遗物：遗物池在开局时就洗好了，下一个是谁是确定的
+[*] [b]事件[/b]：悬停"变化一张牌"的选项（混沌之香、低语空洞、共生体、变形林、审判、无尽传送带）看整副牌各自会变成什么；无尽传送带的随机升级和随机药水；在任何"选一张牌变化"的界面上悬停一张牌看它的结果
 [/list]
 
 [h2]Notes[/h2]
@@ -20,6 +30,16 @@ Hover over anything with a random effect and see what it will actually do before
 [*] Not covered yet: attack hit-count modifiers, relics that reorder shuffles, targets after an enemy dies mid-sequence
 [*] Inspired by the Slay the Spire 1 mod 随机数预测大师 (RandomNumberPredictionMaster) by FF; this is an independent rewrite for STS2
 [*] To report a problem, attach %APPDATA%\SlayTheSpire2\logs\RngPredictor.log
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*] F8 开关显示
+[*] 悬停期间每秒刷新几次，如果遗物或能力先消耗了同一条随机数流，显示会立刻自动修正
+[*] 单人模式。无需配置、无依赖，只有 DLL（游戏版本 0.107 及以上）
+[*] 暂未覆盖：改变攻击次数的效果、改变洗牌顺序的遗物、敌人中途死亡后的后续目标
+[*] 灵感来自一代 FF 作者的"随机数预测大师"，本 mod 是为二代独立重写的
+[*] 反馈问题请附上 %APPDATA%\SlayTheSpire2\logs\RngPredictor.log
 [/list]
 
 Source: https://github.com/luojiesi/SLS2Mods

@@ -25,7 +25,7 @@ namespace RngPredictor;
 /// </summary>
 internal static class PredictionManager
 {
-    private enum SourceKind { None, Hand, Potion, Transform, Pile, EventOption }
+    private enum SourceKind { None, Hand, Potion, Transform, Pile, EventOption, RestSite }
 
     public static bool Enabled = true;
 
@@ -156,6 +156,28 @@ internal static class PredictionManager
 
     private static string? _eventOptionKey;
     private static EventModel? _eventForOption;
+    private static MegaCrit.Sts2.Core.Entities.RestSite.RestSiteOption? _restOption;
+
+    /// <summary>A rest-site option button (Dig: the next relic from the grab bag).</summary>
+    public static void OnRestSiteOptionFocused(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton button)
+    {
+        if (!Enabled) return;
+        MegaCrit.Sts2.Core.Entities.RestSite.RestSiteOption? option;
+        try { option = button.Option; } catch { option = null; }
+        if (option == null || !Predictors.IsPredictableRestSiteOption(option)) return;
+        Player? player = null;
+        try { player = Traverse.Create(option).Property("Owner").GetValue<Player>(); } catch { }
+        player ??= EventOwner();
+        if (player == null) return;
+        EnsureTick();
+        _restOption = option;
+        Set(SourceKind.RestSite, button, null, null, null, player);
+    }
+
+    public static void OnRestSiteOptionUnfocused(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton button)
+    {
+        if (_sourceNode == button) Clear();
+    }
 
     public static void OnEventOptionUnfocused(NEventOptionButton button)
     {
@@ -215,6 +237,7 @@ internal static class PredictionManager
         _relic = null;
         _eventOptionKey = null;
         _eventForOption = null;
+        _restOption = null;
         _player = null;
         _lastSig = "";
         _overlay.Hide();
@@ -316,6 +339,8 @@ internal static class PredictionManager
                 return CombatManager.Instance.IsInProgress && NodeAlive(_sourceNode);
             case SourceKind.EventOption:
                 return NodeAlive(_sourceNode) && (_relic != null || _eventOptionKey != null) && _player != null;
+            case SourceKind.RestSite:
+                return NodeAlive(_sourceNode) && _restOption != null && _player != null;
         }
         return false;
     }
@@ -348,6 +373,9 @@ internal static class PredictionManager
                 case SourceKind.EventOption:
                     if (_relic != null && _player != null) pr = Predictors.ForNeowRelic(_relic, _player);
                     else if (_eventOptionKey != null && _eventForOption != null && _player != null) pr = Predictors.ForEventOption(_eventForOption, _eventOptionKey, _player);
+                    break;
+                case SourceKind.RestSite:
+                    if (_restOption != null && _player != null) pr = Predictors.ForRestSiteOption(_restOption, _player);
                     break;
             }
         }

@@ -704,6 +704,20 @@ internal static class Predictors
         pr.Lines.Add(L.T("获得遗物: ", "Relic: ") + string.Join(", ", names));
     }
 
+    // ───────────────────────────── rest site ─────────────────────────────
+
+    public static bool IsPredictableRestSiteOption(MegaCrit.Sts2.Core.Entities.RestSite.RestSiteOption option)
+        => option.GetType().Name == "DigRestSiteOption";
+
+    /// <summary>Dig (Shovel): the next relic from the front of the grab bag.</summary>
+    public static Prediction? ForRestSiteOption(MegaCrit.Sts2.Core.Entities.RestSite.RestSiteOption option, Player p)
+    {
+        if (!IsPredictableRestSiteOption(option)) return null;
+        var pr = new Prediction { Title = L.T("挖掘 → 会挖到的遗物", "Dig → the relic you get") };
+        AddRelicPulls(pr, p, 1);
+        return pr;
+    }
+
     public static bool HasEventOptionPredictor(EventModel ev, string textKey)
     {
         if (RelicPullCount(ev, textKey) > 0) return true;

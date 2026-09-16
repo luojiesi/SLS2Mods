@@ -1,8 +1,8 @@
 {
     "id": "UndoAndRedo",
-    "name": "UndoAndRedo",
+    "name": "Undo and Redo (撤销与重做)",
     "author": "JiesiLuo",
-    "description": "Undo/redo combat actions with Left/Right Arrow: card plays, potions and whole turns, any depth. Singleplayer.",
+    "description": "Undo/redo combat actions with Left/Right Arrow: card plays, potions and whole turns, any depth. Singleplayer. | 战斗中按左方向键撤销上一步（出牌、用药水、结束回合），右方向键重做，可无限步回退到本场战斗开始。仅单人。",
     "version": "2.2.0",
     "has_pck": false,
     "has_dll": true,

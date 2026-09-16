@@ -1,5 +1,7 @@
 Undo and redo your combat actions. Press Left Arrow to take back the last card play, potion use or end of turn; press Right Arrow to redo it. Undo as many steps as you like, all the way back to the start of the fight, across turns.
 
+战斗中的撤销与重做。按左方向键撤回上一步（出牌、使用药水、结束回合），按右方向键重做。想退多少步都可以，可以一直退到本场战斗开始，跨回合也行。
+
 [h2]How it works[/h2]
 [list]
 [*] Left Arrow: undo the last decision (card played, potion used or discarded, turn ended)
@@ -8,8 +10,19 @@ Undo and redo your combat actions. Press Left Arrow to take back the last card p
 [*] Works with card selection prompts, potions, powers, multi-enemy fights and bosses
 [/list]
 
+[h2]使用方法[/h2]
+[list]
+[*] 左方向键：撤销上一个决定（打出的牌、使用或丢弃的药水、结束的回合）
+[*] 右方向键：重做
+[*] 本场战斗内不限步数；撤销"结束回合"时敌人的整个回合一起回退
+[*] 支持选牌提示、药水、能力、多敌人战斗和 Boss 战
+[/list]
+
 [h2]Under the hood[/h2]
 The mod keeps a memento of the whole combat model before every decision and writes it back in place on undo (about 0.1 s), then rebuilds the combat screen from the model. Every undo is verified against the game's own state checksum; if anything does not match, the mod falls back to rebuilding the fight from the game's combat replay log, so you never get a wrong state silently.
+
+[h2]原理[/h2]
+每次决定之前，mod 会给整个战斗状态做一份快照，撤销时原地写回（约 0.1 秒）并重建战斗界面。每次撤销都会用游戏自己的状态校验和核对；一旦不一致，就退回到用游戏的战斗回放记录重建战斗，所以不会悄悄给你一个错误的状态。
 
 [h2]Notes[/h2]
 [list]
@@ -18,6 +31,15 @@ The mod keeps a memento of the whole combat model before every decision and writ
 [*] If you use SpeedX's "auto end turn", undoing an end-of-turn lands on a state with no playable cards, so SpeedX ends the turn again; disable that option to undo end turns
 [*] No configuration, no dependencies, DLL only (game version 0.107 or newer)
 [*] To report a problem, attach %APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log (it stays short). For a full trace, create an empty file named UndoAndRedo.debug in that logs folder before reproducing the issue
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*] 仅单人模式
+[*] 从事件开始的战斗也能撤销（只有快照路径，没有回放兜底）
+[*] 如果开了 SpeedX 的"自动结束回合"，撤销结束回合后手里没有可打的牌，SpeedX 会再次结束回合；想撤销结束回合请关掉那个选项
+[*] 无需配置、无依赖，只有 DLL（游戏版本 0.107 及以上）
+[*] 反馈问题请附上 %APPDATA%\SlayTheSpire2\logs\UndoAndRedo.log（很短）。需要完整日志时，在那个 logs 文件夹里新建一个空文件 UndoAndRedo.debug 再复现问题
 [/list]
 
 Source: https://github.com/luojiesi/SLS2Mods

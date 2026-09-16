@@ -46,7 +46,7 @@ internal static class PLog
 [ModInitializer("Initialize")]
 public static class RngPredictorMod
 {
-    public const string Version = "1.2.0";
+    public const string Version = "1.3.0";
 
     public static void Initialize()
     {
@@ -233,6 +233,29 @@ internal static class Patch_EventOption_OnUnfocus
     {
         try { PredictionManager.OnEventOptionUnfocused(__instance); }
         catch (Exception ex) { PLog.Write($"Event option unfocus hook failed: {ex}"); }
+    }
+}
+
+/// <summary>Rest-site option buttons: Dig shows the relic that will be found.</summary>
+[HarmonyPatch(typeof(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton), "OnFocus")]
+internal static class Patch_RestSiteButton_OnFocus
+{
+    [HarmonyPostfix]
+    public static void Postfix(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton __instance)
+    {
+        try { PredictionManager.OnRestSiteOptionFocused(__instance); }
+        catch (Exception ex) { PLog.Write($"Rest site focus hook failed: {ex}"); }
+    }
+}
+
+[HarmonyPatch(typeof(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton), "OnUnfocus")]
+internal static class Patch_RestSiteButton_OnUnfocus
+{
+    [HarmonyPostfix]
+    public static void Postfix(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton __instance)
+    {
+        try { PredictionManager.OnRestSiteOptionUnfocused(__instance); }
+        catch (Exception ex) { PLog.Write($"Rest site unfocus hook failed: {ex}"); }
     }
 }
 

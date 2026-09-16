@@ -120,6 +120,10 @@ internal static class SelfTest
         try { await ConveyorTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: conveyor test failed: {ex}"); Check("Conveyor test ran", false, ex.Message); }
 
+        // ── 0c. Rest site: Shovel + Dig, predict the relic, dig, compare ──
+        try { await RestSiteTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: rest site test failed: {ex}"); Check("Rest site test ran", false, ex.Message); }
+
         // ── 1. transform event: hover a deck card on the transform screen, then transform it ──
         try { await TransformTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: transform test failed: {ex}"); Check("transform test ran", false, ex.Message); }
@@ -534,6 +538,51 @@ internal static class SelfTest
         for (int i = 0; i < 30; i++) await NextFrame();
         try { if ((NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 0) rm.EventSynchronizer.ChooseLocalOption(0); } catch (Exception ex) { PLog.Write($"SELFTEST: leaving this-or-that: {ex.Message}"); }
         for (int i = 0; i < 60; i++) await NextFrame();
+    }
+
+    private static async Task RestSiteTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        await RelicCmd.Obtain(ModelDb.Relic<Shovel>().ToMutable(), me);
+        for (int i = 0; i < 20; i++) await NextFrame();
+        PLog.Write("SELFTEST: entering a rest site");
+        await rm.EnterRoomDebug(MegaCrit.Sts2.Core.Rooms.RoomType.RestSite);
+        if (!await WaitUntil(() => MegaCrit.Sts2.Core.Nodes.Rooms.NRestSiteRoom.Instance != null && rm.RestSiteSynchronizer.GetLocalOptions().Count > 0, 30, "rest site options")) return;
+        for (int i = 0; i < 40; i++) await NextFrame();
+        var options = rm.RestSiteSynchronizer.GetLocalOptions();
+        int digIndex = options.ToList().FindIndex(o => o.GetType().Name == "DigRestSiteOption");
+        PLog.Write($"SELFTEST: rest site options {string.Join(",", options.Select(o => o.OptionId))}, dig index {digIndex}");
+        if (digIndex < 0) { Check("rest site dig option present", false, "no Dig option"); return; }
+        var buttons = new List<MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton>();
+        CollectButtons(MegaCrit.Sts2.Core.Nodes.Rooms.NRestSiteRoom.Instance!, buttons);
+        var digButton = buttons.FirstOrDefault(b => b.Option != null && b.Option.GetType().Name == "DigRestSiteOption");
+        if (digButton != null)
+        {
+            digButton.GrabFocus();
+            for (int i = 0; i < 8; i++) await NextFrame();
+            PLog.Write($"SELFTEST hover dig: overlayShowing={PredictionManager.OverlayShowing}");
+            Shot("00_rest_dig");
+            Check("Dig hover shows overlay (real focus path)", PredictionManager.OverlayShowing, $"buttons {buttons.Count}");
+            digButton.ReleaseFocus();
+            for (int i = 0; i < 3; i++) await NextFrame();
+        }
+        else Check("rest site dig button found", false, $"buttons {buttons.Count}");
+        var peek = Sim.PeekRelicsFromFront(me, 1).FirstOrDefault().relic;
+        var relicsBefore = me.Relics.ToList();
+        await rm.RestSiteSynchronizer.ChooseLocalOption(digIndex);
+        if (!await WaitUntil(() => me.Relics.Count > relicsBefore.Count, 30, "dig relic")) { Check("Dig relic", false, "timeout"); return; }
+        for (int i = 0; i < 60; i++) await NextFrame();
+        var gained = me.Relics.Where(r => !relicsBefore.Contains(r)).Select(r => r.Id.Entry).ToList();
+        Check("Dig relic", peek != null && gained.Count == 1 && gained[0] == peek.Id.Entry, $"predicted [{peek?.Id.Entry}] actual [{string.Join(",", gained)}]");
+    }
+
+    private static void CollectButtons(Node node, List<MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton> into)
+    {
+        foreach (var child in node.GetChildren())
+        {
+            if (child is MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton b) into.Add(b);
+            CollectButtons(child, into);
+        }
     }
 
     private static async Task ConveyorTest(RunManager rm, IRunState rs)
