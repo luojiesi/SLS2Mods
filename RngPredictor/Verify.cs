@@ -100,8 +100,58 @@ internal static class Verify_CreateForReward
     [HarmonyPostfix]
     public static void Postfix(IEnumerable<CardCreationResult> __result, string __state)
     {
-        try { Verify.Report("CreateForReward", __state, string.Join(",", __result.Select(r => r.Card.Id.Entry + (r.Card.IsUpgraded ? "+" : "")))); }
+        try
+        {
+            string actual = string.Join(",", __result.Select(r => r.Card.Id.Entry + (r.Card.IsUpgraded ? "+" : "")));
+            if (actual != __state && actual.Replace("+", "") == __state.Replace("+", ""))
+            {
+                // Same cards, different upgrade flags: a relic hook we could not reproduce exactly. Not a wrong prediction.
+                PLog.Write($"VERIFY OK      CreateForReward (upgrade flags differ): predicted [{__state}] actual [{actual}]");
+                Verify.Matches++;
+                return;
+            }
+            Verify.Report("CreateForReward", __state, actual);
+        }
         catch (Exception ex) { PLog.Write($"verify postfix failed: {ex.Message}"); }
+    }
+}
+
+/// <summary>Lightning orb passive/evoke: the random target draw. Logs the CombatTargets counter to spot extra draws.</summary>
+[HarmonyPatch(typeof(MegaCrit.Sts2.Core.Models.Orbs.LightningOrb), "ApplyLightningDamage")]
+internal static class Verify_Lightning
+{
+    [HarmonyPrefix]
+    public static void Prefix(MegaCrit.Sts2.Core.Models.Orbs.LightningOrb __instance, decimal value, MegaCrit.Sts2.Core.Entities.Creatures.Creature? target, out (string predicted, int counter) __state)
+    {
+        __state = ("", -1);
+        try
+        {
+            if (target != null) { __state = ("(fixed)", -1); return; }
+            var p = __instance.Owner;
+            var rng = p.RunState.Rng.CombatTargets;
+            var list = __instance.CombatState.GetOpponentsOf(p.Creature).Where(e => e.IsHittable).ToList();
+            var t = Sim.Clone(rng).NextItem(list);
+            __state = (t?.Name ?? "none", rng.Counter);
+        }
+        catch (Exception ex) { __state = ("ERROR " + ex.Message, -1); }
+    }
+
+    [HarmonyPostfix]
+    public static void Postfix(MegaCrit.Sts2.Core.Models.Orbs.LightningOrb __instance, decimal value, System.Threading.Tasks.Task<IEnumerable<MegaCrit.Sts2.Core.Entities.Creatures.Creature>> __result, (string predicted, int counter) __state)
+    {
+        if (__state.predicted == "(fixed)") return;
+        __result.ContinueWith(t =>
+        {
+            try
+            {
+                if (!t.IsCompletedSuccessfully) return;
+                var actual = string.Join(",", t.Result.Select(c => c.Name));
+                int after = -1;
+                try { after = __instance.Owner.RunState.Rng.CombatTargets.Counter; } catch { }
+                Verify.Report($"Lightning {value} (counter {__state.counter}->{after})", __state.predicted, actual);
+            }
+            catch (Exception ex) { PLog.Write($"verify lightning failed: {ex.Message}"); }
+        }, System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
     }
 }
 

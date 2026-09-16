@@ -25,7 +25,7 @@ namespace RngPredictor;
 /// </summary>
 internal static class PredictionManager
 {
-    private enum SourceKind { None, Hand, Potion, Transform, Pile, EventOption, RestSite }
+    private enum SourceKind { None, Hand, Potion, Transform, Pile, EventOption, RestSite, EndTurn }
 
     public static bool Enabled = true;
 
@@ -177,6 +177,32 @@ internal static class PredictionManager
     public static void OnRestSiteOptionUnfocused(MegaCrit.Sts2.Core.Nodes.RestSite.NRestSiteButton button)
     {
         if (_sourceNode == button) Clear();
+    }
+
+    /// <summary>The End Turn button: orb passives (Lightning targets) that will fire.</summary>
+    public static void OnEndTurnFocused(NEndTurnButton button)
+    {
+        if (!Enabled || !CombatManager.Instance.IsInProgress) return;
+        var player = LocalCombatPlayer();
+        if (player == null) return;
+        EnsureTick();
+        Set(SourceKind.EndTurn, button, null, null, null, player);
+    }
+
+    public static void OnEndTurnUnfocused(NEndTurnButton button)
+    {
+        if (_sourceNode == button) Clear();
+    }
+
+    private static Player? LocalCombatPlayer()
+    {
+        try
+        {
+            var pile = NCombatRoom.Instance?.Ui?.DiscardPile;
+            if (pile != null) { var p = PlayerOfPile(pile); if (p != null) return p; }
+        }
+        catch { }
+        return EventOwner();
     }
 
     public static void OnEventOptionUnfocused(NEventOptionButton button)
@@ -341,6 +367,8 @@ internal static class PredictionManager
                 return NodeAlive(_sourceNode) && (_relic != null || _eventOptionKey != null) && _player != null;
             case SourceKind.RestSite:
                 return NodeAlive(_sourceNode) && _restOption != null && _player != null;
+            case SourceKind.EndTurn:
+                return CombatManager.Instance.IsInProgress && NodeAlive(_sourceNode) && _player != null;
         }
         return false;
     }
@@ -376,6 +404,9 @@ internal static class PredictionManager
                     break;
                 case SourceKind.RestSite:
                     if (_restOption != null && _player != null) pr = Predictors.ForRestSiteOption(_restOption, _player);
+                    break;
+                case SourceKind.EndTurn:
+                    if (_player != null) pr = Predictors.ForEndTurn(_player);
                     break;
             }
         }

@@ -312,6 +312,54 @@ internal static class SelfTest
             Check("TrueGrit exhaust", ok, $"predicted [{predicted?.Id.Entry}] actual [{string.Join(",", exhausted.Select(c => c.Id.Entry))}]");
         }
 
+        // Orbs: Zap channels a Lightning orb (Ironclad gets one slot); Dualcast then evokes it twice.
+        try
+        {
+            var zap = await AddToHand<Zap>(rs, me);
+            if (zap != null) await Play(rm, zap, null);
+            var dual = await AddToHand<Dualcast>(rs, me);
+            if (dual != null)
+            {
+                var pr = Predictors.ForHandCard(dual);
+                PLog.Write($"SELFTEST hover DUALCAST: {(pr == null ? "(no prediction)" : Describe(pr))}");
+                var enemies = me.Creature.CombatState!.HittableEnemies.ToList();
+                var hpBefore = enemies.ToDictionary(e => e, e => e.CurrentHp + e.Block);
+                var predictedLoss = new Dictionary<Creature, decimal>();
+                if (pr != null)
+                    foreach (var (creature, label) in pr.Targets)
+                    {
+                        int open = label.LastIndexOf('('); int close = label.LastIndexOf(')');
+                        if (open >= 0 && close > open && decimal.TryParse(label.Substring(open + 1, close - open - 1), out var d)) predictedLoss[creature] = d;
+                    }
+                // Only the evoke part happens on play; strip the end-of-turn passive share of the prediction.
+                var sim = new OrbSim(me, Sim.Clone(me.RunState.Rng.CombatTargets));
+                sim.EvokeNext(false); sim.EvokeNext(true);
+                // Compare which enemies get hit (an enemy killed by the first evoke is out of the second draw).
+                var predictedHits = new Dictionary<Creature, int>();
+                foreach (var (c, _, _) in sim.Hits) predictedHits[c] = predictedHits.GetValueOrDefault(c) + 1;
+                PLog.Write($"SELFTEST before Dualcast: counter={me.RunState.Rng.CombatTargets.Counter} orbs={string.Join(",", me.PlayerCombatState.OrbQueue.Orbs.Select(o => o.Id.Entry))} enemies={string.Join(" | ", enemies.Select(e => $"{e.Name} hp {e.CurrentHp} block {e.Block} hittable {e.IsHittable}"))} sim=[{string.Join("; ", sim.Lines)}]");
+                await Play(rm, dual, null);
+                PLog.Write($"SELFTEST after Dualcast: counter={me.RunState.Rng.CombatTargets.Counter} enemies={string.Join(" | ", enemies.Select(e => $"{e.Name} hp {e.CurrentHp} block {e.Block}"))}");
+                string p = string.Join(", ", enemies.Select(e => $"{e.Name}={predictedHits.GetValueOrDefault(e, 0)}"));
+                string a = string.Join(", ", enemies.Select(e => $"{e.Name}={(hpBefore[e] - (e.CurrentHp + e.Block) > 0 ? (predictedHits.GetValueOrDefault(e, 0) > 1 && hpBefore[e] - (e.CurrentHp + e.Block) >= 16 ? 2 : 1) : 0)}"));
+                Check("Dualcast lightning targets", p == a && sim.Hits.Count == 2, $"predicted hits [{p}] actual hits [{a}] (hover prediction: {(pr == null ? "none" : string.Join(",", pr.Targets.Select(t => t.creature.Name + ":" + t.label)))})");
+                var endTurn = NCombatRoom.Instance?.Ui?.EndTurnButton;
+                if (endTurn != null)
+                {
+                    var zap2 = await AddToHand<Zap>(rs, me);
+                    if (zap2 != null) await Play(rm, zap2, null);
+                    PredictionManager.OnEndTurnFocused(endTurn);
+                    for (int i = 0; i < 8; i++) await NextFrame();
+                    var prEnd = Predictors.ForEndTurn(me);
+                    PLog.Write($"SELFTEST hover END TURN: {(prEnd == null ? "(no prediction)" : Describe(prEnd))} overlayShowing={PredictionManager.OverlayShowing}");
+                    Shot($"{++shotIdx:00}_hover_endturn");
+                    Check("End turn hover shows orb passive", prEnd != null && PredictionManager.OverlayShowing, $"{prEnd?.Lines.Count ?? 0} lines");
+                    PredictionManager.OnEndTurnUnfocused(endTurn);
+                }
+            }
+        }
+        catch (Exception ex) { Check("Orb test ran", false, ex.Message); }
+
         // Attack Potion: predicted 3 options vs the options offered.
         var attackPotion = me.Potions.FirstOrDefault(p => p is AttackPotion);
         if (attackPotion != null)

@@ -3,7 +3,7 @@
     "name": "Random Number Predictor (随机数预测)",
     "author": "JiesiLuo",
     "description": "Hover a card, potion, pile, event option or rest-site option to see what its random effect will actually do: generated cards, random targets, transformations, upgrades, relics, shuffle order. F8 toggles. | 悬停到卡牌、药水、牌堆、事件选项或休息点选项上，直接看到随机效果的真实结果：生成的牌、随机目标、变化结果、升级的牌、随机遗物、洗牌顺序。F8 开关。灵感来自一代的随机数预测大师。",
-    "version": "1.3.1",
+    "version": "1.4.0",
     "min_game_version": "0.107.0",
     "has_pck": false,
     "has_dll": true,

@@ -219,6 +219,25 @@ internal static class Sim
             }
             results.Add((card, upgraded));
         }
+        // Relics may modify the offered cards afterwards (e.g. the egg relics upgrade them). Run the same hook on
+        // detached mutable copies so the prediction shows the final state without touching the game.
+        if (!options.Flags.HasFlag(CardCreationFlags.NoModifyHooks) && results.Count > 0)
+        {
+            try
+            {
+                var copies = new List<CardCreationResult>();
+                foreach (var (card, upgraded) in results)
+                {
+                    var m = (card.CanonicalInstance ?? card).ToMutable();
+                    if (upgraded && m.IsUpgradable) { m.UpgradeInternal(); m.FinalizeUpgradeInternal(); }
+                    copies.Add(new CardCreationResult(m));
+                }
+                MegaCrit.Sts2.Core.Hooks.Hook.TryModifyCardRewardOptions(p.RunState, p, copies, options, out _);
+                for (int i = 0; i < results.Count && i < copies.Count; i++)
+                    results[i] = (results[i].Item1, copies[i].Card.IsUpgraded);
+            }
+            catch (System.Exception ex) { PLog.Write($"reward modify hook simulation failed: {ex.Message}"); }
+        }
         return results;
     }
 

@@ -46,7 +46,7 @@ internal static class PLog
 [ModInitializer("Initialize")]
 public static class RngPredictorMod
 {
-    public const string Version = "1.3.1";
+    public const string Version = "1.4.0";
 
     public static void Initialize()
     {
@@ -233,6 +233,29 @@ internal static class Patch_EventOption_OnUnfocus
     {
         try { PredictionManager.OnEventOptionUnfocused(__instance); }
         catch (Exception ex) { PLog.Write($"Event option unfocus hook failed: {ex}"); }
+    }
+}
+
+/// <summary>End Turn button: which enemies the Lightning orbs' passives will hit.</summary>
+[HarmonyPatch(typeof(NEndTurnButton), "OnFocus")]
+internal static class Patch_EndTurn_OnFocus
+{
+    [HarmonyPostfix]
+    public static void Postfix(NEndTurnButton __instance)
+    {
+        try { PredictionManager.OnEndTurnFocused(__instance); }
+        catch (Exception ex) { PLog.Write($"End turn focus hook failed: {ex}"); }
+    }
+}
+
+[HarmonyPatch(typeof(NEndTurnButton), "OnUnfocus")]
+internal static class Patch_EndTurn_OnUnfocus
+{
+    [HarmonyPostfix]
+    public static void Postfix(NEndTurnButton __instance)
+    {
+        try { PredictionManager.OnEndTurnUnfocused(__instance); }
+        catch (Exception ex) { PLog.Write($"End turn unfocus hook failed: {ex}"); }
     }
 }
 

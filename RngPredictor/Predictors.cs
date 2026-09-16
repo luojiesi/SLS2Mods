@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Localization;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.CardPools;
+using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.PotionPools;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Runs;
@@ -126,6 +127,100 @@ internal static class Predictors
         AddTargets(pr, hits, L.T("被打", "Hit"));
     }
 
+    // ───────────────────────────── orbs ─────────────────────────────
+
+    /// <summary>Replays the orb operations of a Defect card on the simulator. Returns false for unknown cards.</summary>
+    private static bool RunOrbCard(CardModel card, Player p, OrbSim sim)
+    {
+        bool up = card.IsUpgraded;
+        int Repeat(int d) => Sim.IntVar(card, "Repeat", d);
+        int Cards(int d) => Sim.IntVar(card, "Cards", d);
+        switch (card.GetType().Name)
+        {
+            case "Zap": sim.Channel(sim.NewOrb<LightningOrb>()); return true;
+            case "BallLightning": sim.Channel(sim.NewOrb<LightningOrb>()); return true;
+            case "Tempest":
+            {
+                int n = HitCountFromX(card, p, stars: false) + (up ? 1 : 0);
+                for (int i = 0; i < n; i++) sim.Channel(sim.NewOrb<LightningOrb>());
+                return true;
+            }
+            case "Voltaic":
+            {
+                int n = 0;
+                try
+                {
+                    var v = card.DynamicVars["CalculatedChannels"];
+                    n = (int)(decimal)HarmonyLib.Traverse.Create(v).Method("Calculate", new System.Type[] { typeof(Creature) }).GetValue(new object?[] { null });
+                }
+                catch { }
+                for (int i = 0; i < n; i++) sim.Channel(sim.NewOrb<LightningOrb>());
+                return true;
+            }
+            case "Rainbow":
+                sim.Channel(sim.NewOrb<LightningOrb>()); sim.Channel(sim.NewOrb<FrostOrb>()); sim.Channel(sim.NewOrb<DarkOrb>());
+                return true;
+            case "Dualcast":
+                if (sim.Queue.Count > 0) { sim.EvokeNext(false); sim.EvokeNext(true); }
+                return true;
+            case "MultiCast":
+            {
+                int n = HitCountFromX(card, p, stars: false);
+                for (int i = 0; i < n; i++) sim.EvokeNext(i == n - 1);
+                return true;
+            }
+            case "Quadcast":
+            {
+                if (sim.Queue.Count <= 0) return true;
+                int n = Repeat(4);
+                for (int i = 0; i < n; i++) sim.EvokeNext(i == n - 1);
+                return true;
+            }
+            case "Shatter":
+            {
+                int n = sim.Queue.Count;
+                for (int i = 0; i < n; i++) { sim.EvokeNext(false); sim.EvokeNext(true); }
+                return true;
+            }
+            case "Darkness": case "Null": case "ShadowShield": sim.Channel(sim.NewOrb<DarkOrb>()); return true;
+            case "ConsumingShadow": { int n = Repeat(2); for (int i = 0; i < n; i++) sim.Channel(sim.NewOrb<DarkOrb>()); return true; }
+            case "Coolheaded": case "ColdSnap": case "Chill": sim.Channel(sim.NewOrb<FrostOrb>()); return true;
+            case "Glacier": for (int i = 0; i < 2; i++) sim.Channel(sim.NewOrb<FrostOrb>()); return true;
+            case "IceLance": { int n = Repeat(3); for (int i = 0; i < n; i++) sim.Channel(sim.NewOrb<FrostOrb>()); return true; }
+            case "Refract": { int n = Repeat(2); for (int i = 0; i < n; i++) sim.Channel(sim.NewOrb<GlassOrb>()); return true; }
+            case "Glasswork": case "Spinner": sim.Channel(sim.NewOrb<GlassOrb>()); return true;
+            case "Fusion": case "Ignition": sim.Channel(sim.NewOrb<PlasmaOrb>()); return true;
+            case "MeteorStrike": for (int i = 0; i < 3; i++) sim.Channel(sim.NewOrb<PlasmaOrb>()); return true;
+            default: return false;
+        }
+    }
+
+    /// <summary>After the card's own orb operations, add what the resulting orbs will do at end of turn.</summary>
+    private static void FinishOrbSim(Prediction pr, OrbSim sim)
+    {
+        int before = sim.Lines.Count;
+        sim.EndTurnPassives();
+        if (sim.LightningEvents == 0) return; // nothing random happened: no prediction needed
+        var cardLines = sim.Lines.Take(before).Where(l => l.Contains("→")).ToList();
+        var turnLines = sim.Lines.Skip(before).ToList();
+        if (cardLines.Count > 0) pr.Lines.Add(L.T("打出后: ", "On play: ") + string.Join("; ", cardLines));
+        if (turnLines.Count > 0) pr.Lines.Add(L.T("然后回合结束: ", "Then at end of turn: ") + string.Join("; ", turnLines.Select(l => l.Replace(L.T("回合结束 ", "End of turn "), ""))));
+        sim.AddTargetsTo(pr);
+    }
+
+    /// <summary>Hovering the End Turn button: what the orbs' passives will do.</summary>
+    public static Prediction? ForEndTurn(Player p)
+    {
+        if (p.Creature?.CombatState == null) return null;
+        var sim = new OrbSim(p, Sim.Clone(p.RunState.Rng.CombatTargets));
+        sim.EndTurnPassives();
+        if (sim.LightningEvents == 0) return null;
+        var pr = new Prediction { Title = L.T("结束回合 → 充能球被动", "End turn → orb passives") };
+        pr.Lines.AddRange(sim.Lines);
+        sim.AddTargetsTo(pr);
+        return pr;
+    }
+
     private static int HitCountFromX(CardModel card, Player p, bool stars)
     {
         try
@@ -208,9 +303,28 @@ internal static class Predictors
             {
                 var orbRng = Sim.Clone(rng.CombatOrbGeneration);
                 int n = Sim.IntVar(card, "Repeat", 1);
+                var sim = new OrbSim(p, Sim.Clone(rng.CombatTargets));
                 var names = new List<string>();
-                for (int i = 0; i < n; i++) names.Add(Name(OrbModel.GetRandomOrb(orbRng)));
+                for (int i = 0; i < n; i++)
+                {
+                    var canonical = OrbModel.GetRandomOrb(orbRng);
+                    names.Add(Name(canonical));
+                    sim.Channel(sim.NewOrb(canonical));
+                }
                 pr.Lines.Add(L.T("充能: ", "Channel: ") + string.Join(", ", names));
+                FinishOrbSim(pr, sim);
+                break;
+            }
+            case "Zap": case "BallLightning": case "Tempest": case "Voltaic": case "Rainbow":
+            case "Dualcast": case "MultiCast": case "Quadcast": case "Shatter":
+            case "Darkness": case "Coolheaded": case "Glacier": case "Refract": case "IceLance": case "ColdSnap":
+            case "Chill": case "Null": case "ShadowShield": case "ConsumingShadow": case "Glasswork": case "Fusion":
+            case "MeteorStrike": case "Spinner": case "Ignition":
+            {
+                var sim = new OrbSim(p, Sim.Clone(rng.CombatTargets));
+                if (!RunOrbCard(card, p, sim)) return null;
+                FinishOrbSim(pr, sim);
+                if (pr.IsEmpty) return null;
                 break;
             }
             case "Alchemize":

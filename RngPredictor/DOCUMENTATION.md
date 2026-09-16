@@ -73,6 +73,17 @@ Keyed by the model's C# type name (v0.107.1):
   "被打 ×N" marker over each enemy plus the hit order.
 * **Orbs / potions**: Chaos (orb names), Alchemize, Entropic Brew (one potion per open slot), Snecko Oil
   (simulates the 7 draws including a reshuffle, then the cost of every card in hand).
+* **Defect orb queue** ([OrbSim.cs](OrbSim.cs), `CombatTargets` + `CombatOrbGeneration`): a side-effect-free mirror
+  of `OrbCmd.Channel` / `EvokeNext` and `OrbQueue.BeforeTurnEnd` seeded from the player's real orb list and slot
+  count. Channelling into full slots evokes the front orb first; a Lightning evoke or end-of-turn passive is one
+  `CombatTargets.NextItem` over the hittable opponents (values come from the real orb instances, or detached
+  `ToMutable()` copies owned by the player for new orbs, so Focus counts). The sim tracks predicted HP + block per
+  enemy and drops an enemy from later draws once a hit would kill it, exactly as the game's hittable list shrinks.
+  Hand cards: Zap, Ball Lightning, Tempest, Voltaic, Rainbow, Dualcast, Multi-Cast, Quadcast, Shatter, Darkness /
+  Null / Shadow Shield, Consuming Shadow, Coolheaded / Cold Snap / Chill, Glacier, Ice Lance, Refract, Glasswork /
+  Spinner, Fusion / Ignition, Meteor Strike, Chaos (`CombatOrbGeneration` for the random orb). The End Turn button
+  (`NEndTurnButton.OnFocus`) shows this turn's passives. Rendered as a "电球 ×N (total)" marker over each enemy
+  plus the channel / evoke / passive sequence.
 * **Transformations**: on the "choose a card to transform" screen, hovering a deck card shows what it becomes
   as the 1st … Nth transformed card (each transformation is one `NextItem` draw, so the k-th selected card gets
   the k-th result). The stream depends on who opened the screen: events use their own `EventModel.Rng`;
@@ -125,24 +136,26 @@ hover tips do — never the live card, because `NCard` subscribes to its model.
   effect resolves. Relics/powers that trigger on card play and draw from the same stream first (rare) shift
   the result; the mod recomputes as soon as the stream advances, so the display is right again immediately
   after.
-* Attack hit counts ignore `Hook.ModifyAttackHitCount`; if an enemy dies mid-sequence the remaining targets
-  change.
+* Attack hit counts ignore `Hook.ModifyAttackHitCount`; for attack cards, if an enemy dies mid-sequence the
+  remaining targets change (the orb simulation does account for kills).
 * Shuffle prediction ignores `Hook.ModifyShuffleOrder` (relics that reorder the pile).
 * Singleplayer oriented: predictions use the hovered card's owner.
 
 ## Verification
 
 * **Shadow verification** ([Verify.cs](Verify.cs)): prefixes on `CardFactory.GetDistinctForCombat`,
-  `GetForCombat`, `PotionFactory.CreateRandomPotion`, `CardPileCmd.Shuffle` and `CardCmd.Transform` compute the
-  prediction from a clone of the RNG right before the game runs the real thing, and postfixes compare.
+  `GetForCombat`, `CardFactory.CreateForReward`, `PotionFactory.CreateRandomPotion`, `CardPileCmd.Shuffle`,
+  `CardCmd.Transform` and `LightningOrb.ApplyLightningDamage` (random target, with the `CombatTargets` counter
+  before / after) compute the prediction from a clone of the RNG right before the game runs the real thing, and postfixes compare.
   Mismatches are always written to `%APPDATA%\SlayTheSpire2\logs\RngPredictor.log`; matches too while
   `logs\RngPredictor.verify` exists. `GetDistinctForCombat`'s lazy result is materialised once in the postfix
-  so the game never enumerates (and creates cards) twice.
+  so the game never enumerates (and creates cards) twice. `CreateForReward` mirrors `Hook.TryModifyCardRewardOptions`
+  on detached copies (egg relics upgrade rewards); a result that differs only in upgrade flags is logged as OK.
 * **Self-test** ([SelfTest.cs](SelfTest.cs)): create `logs\RngPredictor.selftest` and start the game. It
   starts an unsaved Ironclad run (seed `RNGTEST`, or `logs\RngPredictor.selftest.seed`), enters Aroma of
   Chaos, hovers a deck card on the transform screen (screenshot), transforms it and compares; then jumps into
   `EXOSKELETONS_WEAK` (3 enemies; override with `logs\RngPredictor.selftest.encounter`, `MAP` travels to the
-  first monster node instead), adds Discovery / Infernal Blade / Sword Boomerang / True Grit / Metamorphosis
-  and an Attack Potion + Snecko Oil, focuses every hand card through the real focus path (screenshots in
+  first monster node instead), adds Havoc / Discovery / Infernal Blade / Sword Boomerang / True Grit / Metamorphosis,
+  Zap + Dualcast (Lightning evokes, one of them lethal) and an Attack Potion + Snecko Oil, focuses every hand card through the real focus path (screenshots in
   `logs\rngpredictor_selftest\`), then plays each card / potion and checks the outcome against the
   prediction made a moment earlier. Logs `SELFTEST RESULT: PASS|FAIL` and quits. Never touches saved runs.
