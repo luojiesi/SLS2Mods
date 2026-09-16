@@ -6,14 +6,14 @@ Start every run with a fully upgraded deck and all three egg relics, so every ca
 [list]
 [*] Upgrades your entire starting deck at the start of each run
 [*] Grants Frozen Egg, Molten Egg and Toxic Egg, so every Attack, Skill and Power you pick up mid-run is upgraded automatically
-[*] Removes the three eggs from the relic pool so you never find duplicates
+[*] Removes the three eggs from every relic pool (rewards, shops, events and treasure chests) so you never find duplicates; a run saved with an older version is cleaned the next time it is loaded
 [/list]
 
 [h2]功能[/h2]
 [list]
 [*] 每局开始时升级整副初始牌组
 [*] 直接给你冰冻蛋、熔岩蛋和毒蛋，之后拿到的攻击牌、技能牌、能力牌自动升级
-[*] 把这三个蛋从遗物池里移除，不会再重复拿到
+[*] 把这三个蛋从所有遗物池里移除（奖励、商店、事件和宝箱），不会再重复拿到；旧版本存的进度在下次读档时也会清理
 [/list]
 
 [h2]Notes[/h2]

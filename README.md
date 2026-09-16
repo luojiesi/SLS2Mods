@@ -94,7 +94,7 @@ Automatically grants all three egg relics (Frozen Egg, Molten Egg, Toxic Egg) at
 **How it works:**
 - Postfix on `Player.PopulateStartingRelics` to add the eggs
 - Postfix on `Player.PopulateStartingDeck` to upgrade every card
-- Postfix on `RelicGrabBag.Populate` to remove eggs from the reward pool
+- Postfixes on both `RelicGrabBag.Populate` overloads to remove the eggs from the player's pool (rewards, shops, events) and from the run's shared pool (treasure chests), on `LoadFromSerializable` so runs saved before 1.2.0 are cleaned when loaded, and on `RefreshRarity` so a refilled pool stays egg-free
 
 ---
 

@@ -3,7 +3,7 @@
     "name": "Upgrade All Cards (全卡升级)",
     "author": "JiesiLuo",
     "description": "Start every run with a fully upgraded deck and all three egg relics (Frozen, Molten, Toxic), so every card you see is the upgraded version. Eggs are removed from the relic pool. | 每局开始时初始牌组全部升级，并自带冰冻蛋、熔岩蛋、毒蛋三个遗物，之后拿到的每张牌都是升级版；三个蛋会从遗物池中移除。",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "min_game_version": "0.107.0",
     "has_pck": false,
     "has_dll": true,
