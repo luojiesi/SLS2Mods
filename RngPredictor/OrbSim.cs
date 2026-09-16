@@ -25,11 +25,12 @@ internal sealed class OrbSim
     private int _capacity;
     // Predicted remaining HP+block per enemy: a Lightning hit that would kill an enemy removes it from later draws,
     // exactly as the game's hittable list shrinks when an enemy dies mid-sequence.
-    private readonly Dictionary<Creature, decimal> _remaining = new();
-    private readonly HashSet<Creature> _dead = new();
+    private readonly DamageSim _dmg;
 
     public readonly List<string> Lines = new();
+    /// <summary>One entry per Lightning hit: target, damage actually absorbed (block + HP), what caused it.</summary>
     public readonly List<(Creature creature, decimal damage, string what)> Hits = new();
+    public readonly HashSet<Creature> Kills = new();
     public int LightningEvents;
 
     public IReadOnlyList<OrbModel> Queue => _queue;
@@ -41,6 +42,7 @@ internal sealed class OrbSim
         _targets = targetsClone;
         _queue = p.PlayerCombatState.OrbQueue.Orbs.ToList();
         _capacity = p.PlayerCombatState.OrbQueue.Capacity;
+        _dmg = new DamageSim(p);
     }
 
     public OrbModel NewOrb(OrbModel canonical)
@@ -88,8 +90,8 @@ internal sealed class OrbSim
             try { dmg = orb.EvokeVal; } catch { }
             if (t != null)
             {
-                Hits.Add((t, dmg, L.T("激发", "Evoke")));
-                Lines.Add(L.T($"激发 {Name(orb)} → {Name(t)} {dmg}", $"Evoke {Name(orb)} → {Name(t)} {dmg}") + ApplyDamage(t, dmg));
+                var hit = ApplyDamage(t, dmg, L.T("激发", "Evoke"));
+                Lines.Add(L.T($"激发 {Name(orb)} → {Name(t)} {hit.Damage}", $"Evoke {Name(orb)} → {Name(t)} {hit.Damage}") + (hit.Kill ? L.T("（击杀）", " (kill)") : ""));
                 LightningEvents++;
             }
             return;
@@ -97,21 +99,13 @@ internal sealed class OrbSim
         Lines.Add(L.T("激发 ", "Evoke ") + Name(orb));
     }
 
-    /// <summary>Track predicted HP so a killing hit removes the enemy from the later draws. Returns a marker when it kills.</summary>
-    private string ApplyDamage(Creature t, decimal dmg)
+    /// <summary>Runs the hit through the shared damage ledger (Lightning damage is Unpowered) and records it.</summary>
+    private DamageSim.Hit ApplyDamage(Creature t, decimal dmg, string what)
     {
-        if (!_remaining.TryGetValue(t, out var hp))
-        {
-            try { hp = t.CurrentHp + t.Block; } catch { hp = decimal.MaxValue; }
-        }
-        hp -= dmg;
-        _remaining[t] = hp;
-        if (hp <= 0m)
-        {
-            _dead.Add(t);
-            return L.T("（击杀）", " (kill)");
-        }
-        return "";
+        var hit = _dmg.Apply(t, dmg, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered, _p.Creature, null);
+        Hits.Add((t, hit.Dealt, what));
+        if (hit.Kill) Kills.Add(t);
+        return hit;
     }
 
     /// <summary>Mirror of OrbQueue.BeforeTurnEnd: every orb's passive, in slot order, with the trigger-count hook.</summary>
@@ -131,8 +125,8 @@ internal sealed class OrbSim
                     try { dmg = orb.PassiveVal; } catch { }
                     if (t != null)
                     {
-                        Hits.Add((t, dmg, L.T("被动", "Passive")));
-                        Lines.Add(L.T($"回合结束 {Name(orb)} → {Name(t)} {dmg}", $"End of turn {Name(orb)} → {Name(t)} {dmg}") + ApplyDamage(t, dmg));
+                        var hit = ApplyDamage(t, dmg, L.T("被动", "Passive"));
+                        Lines.Add(L.T($"回合结束 {Name(orb)} → {Name(t)} {hit.Damage}", $"End of turn {Name(orb)} → {Name(t)} {hit.Damage}") + (hit.Kill ? L.T("（击杀）", " (kill)") : ""));
                         LightningEvents++;
                     }
                 }
@@ -143,7 +137,7 @@ internal sealed class OrbSim
     private Creature? PickTarget()
     {
         if (_cs == null) return null;
-        var list = _cs.GetOpponentsOf(_p.Creature).Where(e => e.IsHittable && !_dead.Contains(e)).ToList();
+        var list = _cs.GetOpponentsOf(_p.Creature).Where(e => e.IsHittable && !_dmg.IsDead(e)).ToList();
         if (list.Count == 0) return null;
         return _targets.NextItem(list);
     }
@@ -161,6 +155,6 @@ internal sealed class OrbSim
             total[c] += dmg;
         }
         foreach (var c in order)
-            pr.Targets.Add((c, L.T($"电球 ×{count[c]} ({total[c]})", $"Lightning ×{count[c]} ({total[c]})")));
+            pr.Targets.Add((c, L.T($"电球 ×{count[c]} ({total[c]})", $"Lightning ×{count[c]} ({total[c]})") + (Kills.Contains(c) ? L.T(" 击杀", " kill") : "")));
     }
 }

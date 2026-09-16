@@ -68,17 +68,23 @@ Keyed by the model's C# type name (v0.107.1):
   excluded from "random card in hand" pools.
 * **Random plays from piles** (`Shuffle` + `CombatTargets`): Beat Down, Catastrophe, Uproar — shows the cards
   and, for single-target attacks, the enemy each will hit.
-* **Random targets** (`CombatTargets`): Sword Boomerang, Ricochet, Rip and Tear, Sweeping Gaze, Stardust
-  (hits = stars), Volley (hits = energy), Flak Cannon (hits = statuses), Bouncing Flask. Rendered as a
-  "被打 ×N" marker over each enemy plus the hit order.
+* **Random targets** (`CombatTargets`, [DamageSim.cs](DamageSim.cs)): Sword Boomerang, Ricochet, Rip and Tear, Sweeping
+  Gaze (Osty), Stardust (hits = stars), Volley (hits = energy), Flak Cannon (hits = statuses), Bouncing Flask
+  (poison, `HittableEnemies`). `DamageSim.RandomAttack` mirrors `AttackCommand.Execute` with
+  `TargetingRandomOpponents`: the hit count goes through `Hook.ModifyAttackHitCount` on a throw-away builder, then
+  per hit one `CombatTargets.NextItem` over the attacker's living opponents minus the ones earlier hits killed,
+  and the damage pipeline of `CreatureCmd.Damage` (`Hook.ModifyDamage` → block → `Hook.ModifyHpLost` →
+  `LoseHpInternal`) on a predicted HP / block ledger. Rendered as a "被打 ×N (damage absorbed)" marker over each
+  enemy (plus 击杀 when a hit kills) and the hit order with per-hit damage.
 * **Orbs / potions**: Chaos (orb names), Alchemize, Entropic Brew (one potion per open slot), Snecko Oil
   (simulates the 7 draws including a reshuffle, then the cost of every card in hand).
 * **Defect orb queue** ([OrbSim.cs](OrbSim.cs), `CombatTargets` + `CombatOrbGeneration`): a side-effect-free mirror
   of `OrbCmd.Channel` / `EvokeNext` and `OrbQueue.BeforeTurnEnd` seeded from the player's real orb list and slot
   count. Channelling into full slots evokes the front orb first; a Lightning evoke or end-of-turn passive is one
   `CombatTargets.NextItem` over the hittable opponents (values come from the real orb instances, or detached
-  `ToMutable()` copies owned by the player for new orbs, so Focus counts). The sim tracks predicted HP + block per
-  enemy and drops an enemy from later draws once a hit would kill it, exactly as the game's hittable list shrinks.
+  `ToMutable()` copies owned by the player for new orbs, so Focus counts). Lightning hits run through the same
+  `DamageSim` ledger as attacks (Unpowered), so an enemy a hit would kill is dropped from later draws, exactly as the
+  game's hittable list shrinks.
   Hand cards: Zap, Ball Lightning, Tempest, Voltaic, Rainbow, Dualcast, Multi-Cast, Quadcast, Shatter, Darkness /
   Null / Shadow Shield, Consuming Shadow, Coolheaded / Cold Snap / Chill, Glacier, Ice Lance, Refract, Glasswork /
   Spinner, Fusion / Ignition, Meteor Strike, Chaos (`CombatOrbGeneration` for the random orb). The End Turn button
@@ -136,8 +142,8 @@ hover tips do — never the live card, because `NCard` subscribes to its model.
   effect resolves. Relics/powers that trigger on card play and draw from the same stream first (rare) shift
   the result; the mod recomputes as soon as the stream advances, so the display is right again immediately
   after.
-* Attack hit counts ignore `Hook.ModifyAttackHitCount`; for attack cards, if an enemy dies mid-sequence the
-  remaining targets change (the orb simulation does account for kills).
+* Kills are predicted from the damage hooks and the current HP / block; effects that fire on damage (thorns,
+  on-hit healing, minion death rules) are not simulated, so a sequence that depends on them can differ.
 * Shuffle prediction ignores `Hook.ModifyShuffleOrder` (relics that reorder the pile).
 * Singleplayer oriented: predictions use the hovered card's owner.
 
@@ -156,6 +162,6 @@ hover tips do — never the live card, because `NCard` subscribes to its model.
   Chaos, hovers a deck card on the transform screen (screenshot), transforms it and compares; then jumps into
   `EXOSKELETONS_WEAK` (3 enemies; override with `logs\RngPredictor.selftest.encounter`, `MAP` travels to the
   first monster node instead), adds Havoc / Discovery / Infernal Blade / Sword Boomerang / True Grit / Metamorphosis,
-  Zap + Dualcast (Lightning evokes, one of them lethal) and an Attack Potion + Snecko Oil, focuses every hand card through the real focus path (screenshots in
+  Sword Boomerang with 3 Strength (one hit lethal), Zap + Dualcast (Lightning evokes, one of them lethal) and an Attack Potion + Snecko Oil, focuses every hand card through the real focus path (screenshots in
   `logs\rngpredictor_selftest\`), then plays each card / potion and checks the outcome against the
   prediction made a moment earlier. Logs `SELFTEST RESULT: PASS|FAIL` and quits. Never touches saved runs.

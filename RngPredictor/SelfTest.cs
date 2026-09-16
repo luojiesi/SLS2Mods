@@ -17,6 +17,8 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Characters;
 using MegaCrit.Sts2.Core.Models.Potions;
+using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
@@ -247,24 +249,30 @@ internal static class SelfTest
         var selector = new RecordingSelector();
         using var selectorScope = CardSelectCmd.UseSelector(selector);
 
-        // Sword Boomerang: predicted random targets vs HP lost.
+        // Sword Boomerang: predicted random targets vs HP lost. With 3 Strength each hit does 6, so the 6-HP enemy
+        // dies on its first hit and later draws must skip it (and the damage hook path is exercised).
         if (boomerang != null)
         {
+            await PowerCmd.Apply<StrengthPower>(new BlockingPlayerChoiceContext(), me.Creature, 3m, me.Creature, null);
+            for (int i = 0; i < 10; i++) await NextFrame();
             var pr = Predictors.ForHandCard(boomerang)!;
+            PLog.Write($"SELFTEST boomerang prediction: lines [{string.Join("; ", pr.Lines)}] targets [{string.Join(",", pr.Targets.Select(t => t.creature.Name + ":" + t.label))}] enemies={string.Join(" | ", me.Creature.CombatState!.HittableEnemies.Select(e => $"{e.Name} hp {e.CurrentHp} block {e.Block}"))}");
             var enemies = me.Creature.CombatState!.HittableEnemies.ToList();
             var hpBefore = enemies.ToDictionary(e => e, e => e.CurrentHp + e.Block);
-            int dmg = (int)boomerang.DynamicVars.Damage.BaseValue;
             var predictedLoss = new Dictionary<Creature, int>();
             foreach (var (creature, label) in pr.Targets)
             {
-                int hits = int.Parse(label.Substring(label.LastIndexOf('×') + 1));
-                predictedLoss[creature] = hits * dmg;
+                int lp = label.IndexOf('(') + 1, rp = label.IndexOf(')');
+                predictedLoss[creature] = (int)decimal.Parse(label.Substring(lp, rp - lp));
             }
             await Play(rm, boomerang, null);
             var actual = enemies.ToDictionary(e => e, e => hpBefore[e] - (e.CurrentHp + e.Block));
             string p = string.Join(", ", enemies.Select(e => $"{e.Name}={predictedLoss.GetValueOrDefault(e, 0)}"));
             string a = string.Join(", ", enemies.Select(e => $"{e.Name}={actual[e]}"));
             Check("SwordBoomerang targets", p == a, $"predicted [{p}] actual [{a}]");
+            await PowerCmd.Apply<StrengthPower>(new BlockingPlayerChoiceContext(), me.Creature, -3m, me.Creature, null);
+            for (int i = 0; i < 10; i++) await NextFrame();
+            PLog.Write($"SELFTEST strength after removal: {me.Creature.GetPowerAmount<StrengthPower>()}");
         }
 
         // Metamorphosis: predicted attacks vs the new cards in the draw pile.
@@ -324,25 +332,25 @@ internal static class SelfTest
                 PLog.Write($"SELFTEST hover DUALCAST: {(pr == null ? "(no prediction)" : Describe(pr))}");
                 var enemies = me.Creature.CombatState!.HittableEnemies.ToList();
                 var hpBefore = enemies.ToDictionary(e => e, e => e.CurrentHp + e.Block);
-                var predictedLoss = new Dictionary<Creature, decimal>();
+                var hoverLoss = new Dictionary<Creature, decimal>();
                 if (pr != null)
                     foreach (var (creature, label) in pr.Targets)
                     {
                         int open = label.LastIndexOf('('); int close = label.LastIndexOf(')');
-                        if (open >= 0 && close > open && decimal.TryParse(label.Substring(open + 1, close - open - 1), out var d)) predictedLoss[creature] = d;
+                        if (open >= 0 && close > open && decimal.TryParse(label.Substring(open + 1, close - open - 1), out var d)) hoverLoss[creature] = d;
                     }
                 // Only the evoke part happens on play; strip the end-of-turn passive share of the prediction.
                 var sim = new OrbSim(me, Sim.Clone(me.RunState.Rng.CombatTargets));
                 sim.EvokeNext(false); sim.EvokeNext(true);
                 // Compare which enemies get hit (an enemy killed by the first evoke is out of the second draw).
-                var predictedHits = new Dictionary<Creature, int>();
-                foreach (var (c, _, _) in sim.Hits) predictedHits[c] = predictedHits.GetValueOrDefault(c) + 1;
+                var orbLoss = new Dictionary<Creature, decimal>();
+                foreach (var (c, dealt, _) in sim.Hits) orbLoss[c] = orbLoss.GetValueOrDefault(c) + dealt;
                 PLog.Write($"SELFTEST before Dualcast: counter={me.RunState.Rng.CombatTargets.Counter} orbs={string.Join(",", me.PlayerCombatState.OrbQueue.Orbs.Select(o => o.Id.Entry))} enemies={string.Join(" | ", enemies.Select(e => $"{e.Name} hp {e.CurrentHp} block {e.Block} hittable {e.IsHittable}"))} sim=[{string.Join("; ", sim.Lines)}]");
                 await Play(rm, dual, null);
                 PLog.Write($"SELFTEST after Dualcast: counter={me.RunState.Rng.CombatTargets.Counter} enemies={string.Join(" | ", enemies.Select(e => $"{e.Name} hp {e.CurrentHp} block {e.Block}"))}");
-                string p = string.Join(", ", enemies.Select(e => $"{e.Name}={predictedHits.GetValueOrDefault(e, 0)}"));
-                string a = string.Join(", ", enemies.Select(e => $"{e.Name}={(hpBefore[e] - (e.CurrentHp + e.Block) > 0 ? (predictedHits.GetValueOrDefault(e, 0) > 1 && hpBefore[e] - (e.CurrentHp + e.Block) >= 16 ? 2 : 1) : 0)}"));
-                Check("Dualcast lightning targets", p == a && sim.Hits.Count == 2, $"predicted hits [{p}] actual hits [{a}] (hover prediction: {(pr == null ? "none" : string.Join(",", pr.Targets.Select(t => t.creature.Name + ":" + t.label)))})");
+                string p = string.Join(", ", enemies.Select(e => $"{e.Name}={orbLoss.GetValueOrDefault(e, 0)}"));
+                string a = string.Join(", ", enemies.Select(e => $"{e.Name}={hpBefore[e] - (e.CurrentHp + e.Block)}"));
+                Check("Dualcast lightning targets", p == a && sim.Hits.Count == 2, $"predicted loss [{p}] actual loss [{a}] (hover prediction: {(pr == null ? "none" : string.Join(",", pr.Targets.Select(t => t.creature.Name + ":" + t.label)))})");
                 var endTurn = NCombatRoom.Instance?.Ui?.EndTurnButton;
                 if (endTurn != null)
                 {

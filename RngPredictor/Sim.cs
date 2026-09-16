@@ -82,23 +82,6 @@ internal static class Sim
         return result;
     }
 
-    /// <summary>Mirror of AttackCommand.TargetingRandomOpponents: one draw per hit over living opponents.</summary>
-    public static List<Creature> RandomAttackTargets(Player p, int hits, Rng rng)
-    {
-        var result = new List<Creature>();
-        var cs = p.Creature.CombatState;
-        if (cs == null) return result;
-        for (int i = 0; i < hits; i++)
-        {
-            var valid = cs.GetOpponentsOf(p.Creature).Where(c => c.IsAlive).ToList();
-            if (valid.Count == 0) break;
-            var t = rng.NextItem(valid);
-            if (t == null) break;
-            result.Add(t);
-        }
-        return result;
-    }
-
     /// <summary>Mirror of <c>Rng.CombatTargets.NextItem(CombatState.HittableEnemies)</c> repeated.</summary>
     public static List<Creature> RandomHittableTargets(Player p, int hits, Rng rng)
     {

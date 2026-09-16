@@ -84,6 +84,32 @@ internal static class Predictors
         try { return c.CurrentUpgradeLevel; } catch { return 0; }
     }
 
+    /// <summary>Markers "Hit ×N (damage absorbed)" plus the hit sequence, with kills flagged (see <see cref="DamageSim"/>).</summary>
+    private static void AddAttackHits(Prediction pr, List<DamageSim.Hit> hits, string what)
+    {
+        if (hits.Count == 0) return;
+        var order = new List<Creature>();
+        var count = new Dictionary<Creature, int>();
+        var total = new Dictionary<Creature, decimal>();
+        var killed = new HashSet<Creature>();
+        foreach (var h in hits)
+        {
+            if (!count.ContainsKey(h.Target)) { count[h.Target] = 0; total[h.Target] = 0m; order.Add(h.Target); }
+            count[h.Target]++;
+            total[h.Target] += h.Dealt;
+            if (h.Kill) killed.Add(h.Target);
+        }
+        foreach (var c in order)
+            pr.Targets.Add((c, $"{what} ×{count[c]} ({total[c]})" + (killed.Contains(c) ? L.T(" 击杀", " kill") : "")));
+        pr.Lines.Add(L.T("目标顺序: ", "Target order: ") + string.Join(" → ", hits.Select(h => Name(h.Target) + " " + h.Damage + (h.Kill ? L.T("（击杀）", " (kill)") : ""))));
+    }
+
+    private static decimal DamageBase(CardModel card) { try { return card.DynamicVars.Damage.BaseValue; } catch { return 0m; } }
+    private static MegaCrit.Sts2.Core.ValueProps.ValueProp DamageProps(CardModel card) { try { return card.DynamicVars.Damage.Props; } catch { return MegaCrit.Sts2.Core.ValueProps.ValueProp.Move; } }
+
+    private static List<DamageSim.Hit> RandomAttack(CardModel card, Player p, int hits, Rng targets) =>
+        new DamageSim(p).RandomAttack(card, DamageBase(card), DamageProps(card), hits, targets);
+
     private static void AddTargets(Prediction pr, List<Creature> targets, string what)
     {
         if (targets.Count == 0) return;
@@ -475,25 +501,31 @@ internal static class Predictors
             // ── random targets (CombatTargets) ──
             case "SwordBoomerang":
             case "Ricochet":
-                AddTargets(pr, Sim.RandomAttackTargets(p, Sim.IntVar(card, "Repeat", 1), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+                AddAttackHits(pr, RandomAttack(card, p, Sim.IntVar(card, "Repeat", 1), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
                 break;
             case "RipAndTear":
-                AddTargets(pr, Sim.RandomAttackTargets(p, 2, Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+                AddAttackHits(pr, RandomAttack(card, p, 2, Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
                 break;
             case "SweepingGaze":
-                AddTargets(pr, Sim.RandomAttackTargets(p, 1, Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+            {
+                var osty = p.Osty;
+                if (osty == null) { pr.Lines.Add(L.T("奥斯提不在场", "Osty is not in this fight")); break; }
+                decimal dmg = 0m;
+                try { dmg = card.DynamicVars["OstyDamage"].BaseValue; } catch { }
+                AddAttackHits(pr, new DamageSim(p).RandomAttack(card, dmg, MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, 1, Sim.Clone(rng.CombatTargets), osty), L.T("被打", "Hit"));
                 break;
+            }
             case "Stardust":
-                AddTargets(pr, Sim.RandomAttackTargets(p, HitCountFromX(card, p, stars: true), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+                AddAttackHits(pr, RandomAttack(card, p, HitCountFromX(card, p, stars: true), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
                 break;
             case "Volley":
-                AddTargets(pr, Sim.RandomAttackTargets(p, HitCountFromX(card, p, stars: false), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+                AddAttackHits(pr, RandomAttack(card, p, HitCountFromX(card, p, stars: false), Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
                 break;
             case "FlakCannon":
             {
                 int statuses = 0;
                 try { statuses = p.PlayerCombatState.AllCards.Count(c => c.Type == CardType.Status && c.Pile != null && c.Pile.Type != PileType.Exhaust); } catch { }
-                AddTargets(pr, Sim.RandomAttackTargets(p, statuses, Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
+                AddAttackHits(pr, RandomAttack(card, p, statuses, Sim.Clone(rng.CombatTargets)), L.T("被打", "Hit"));
                 break;
             }
             case "BouncingFlask":
