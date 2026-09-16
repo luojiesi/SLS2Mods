@@ -120,7 +120,8 @@ Keyed by the model's C# type name (v0.107.1):
 * **Event options with random outcomes** (`Predictors.ForEventOption`, keyed by event type + option text key):
   Endless Conveyor "Observe the chef" / "Spicy Snappy" (random upgrade: `ev.Rng.NextItem(deck.Where(IsUpgradable))`
   — with a fully upgraded deck the game upgrades nothing and the overlay says so), "Suspicious Condiment"
-  (random potion from the character + shared pools via `PlayerRng.Rewards`), "Jelly Liver" and the transform
+  (random potion from the character + shared pools via `PlayerRng.Rewards`; The Legends Were True's "Slowly find an
+  exit" draws its potion the same way, after an HP loss that does not touch the stream), "Jelly Liver" and the transform
   options of Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove and Trial (whole-deck "pick which →
   becomes what" from the event's `Rng`; multi-card options show the 1st pick).
 * **Shuffle order**: hovering the draw or discard pile shows the draw pile after the next reshuffle (top

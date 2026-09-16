@@ -42,6 +42,8 @@ internal static class SelfTest
     private static string FlagPath => System.IO.Path.Combine(OS.GetUserDataDir(), "logs", "RngPredictor.selftest");
     private static bool _started;
     public static bool Running;
+    /// <summary>Last rewards set the game offered (recorded by <see cref="SelfTest_RecordRewards"/>).</summary>
+    public static MegaCrit.Sts2.Core.Rewards.RewardsSet? LastRewardsSet;
 
     private sealed class RecordingSelector : MegaCrit.Sts2.Core.TestSupport.ICardSelector
     {
@@ -117,6 +119,10 @@ internal static class SelfTest
         // ── 0a. This or That: predict the random relic, pick "ornate", compare ──
         try { await RelicPullTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: relic pull test failed: {ex}"); Check("Relic pull test ran", false, ex.Message); }
+
+        // ── 0a2. The Legends Were True: hover "slowly find an exit", predict the potion, choose it, compare the reward ──
+        try { await LegendsTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: legends test failed: {ex}"); Check("Legends test ran", false, ex.Message); }
 
         // ── 0b. Endless Conveyor: hover the options, then "observe the chef" (random upgrade) ──
         try { await ConveyorTest(rm, rs); }
@@ -596,6 +602,64 @@ internal static class SelfTest
         for (int i = 0; i < 60; i++) await NextFrame();
     }
 
+    private static async Task LegendsTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        var eventModel = ModelDb.AllEvents.FirstOrDefault(e => e.Id.Entry == "THE_LEGENDS_WERE_TRUE");
+        if (eventModel == null) { PLog.Write("SELFTEST: THE_LEGENDS_WERE_TRUE not found; skipping"); return; }
+        PLog.Write("SELFTEST: entering THE_LEGENDS_WERE_TRUE");
+        rs.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Unknown, MegaCrit.Sts2.Core.Rooms.RoomType.Event, eventModel.Id);
+        await rm.EnterRoom(new EventRoom(eventModel));
+        if (!await WaitUntil(() => (NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 1, 30, "legends options")) return;
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var buttons = NEventRoom.Instance!.Layout!.OptionButtons.ToList();
+        var exit = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("SLOWLY_FIND_AN_EXIT"));
+        if (exit == null) { Check("legends exit option present", false, string.Join(",", buttons.Select(b => b.Option?.TextKey))); return; }
+        exit.GrabFocus();
+        for (int i = 0; i < 8; i++) await NextFrame();
+        var ev = AccessTools.Field(typeof(NEventRoom), "_event")?.GetValue(NEventRoom.Instance) as EventModel;
+        var pr = ev != null ? Predictors.ForEventOption(ev, exit.Option!.TextKey, me) : null;
+        PLog.Write($"SELFTEST legends exit prediction: {(pr == null ? "(none)" : Describe(pr))} overlayShowing={PredictionManager.OverlayShowing}");
+        Shot("00_legends_exit");
+        Check("Legends exit hover shows overlay (real focus path)", PredictionManager.OverlayShowing && pr != null && pr.Lines.Count > 0, $"overlay {PredictionManager.OverlayShowing}, lines {pr?.Lines.Count}");
+        exit.ReleaseFocus();
+        for (int i = 0; i < 3; i++) await NextFrame();
+        IEnumerable<PotionModel> items = me.Character.PotionPool.GetUnlockedPotions(me.UnlockState).Concat(ModelDb.PotionPool<MegaCrit.Sts2.Core.Models.PotionPools.SharedPotionPool>().GetUnlockedPotions(me.UnlockState));
+        var predicted = Sim.Clone(me.PlayerRng.Rewards).NextItem(items);
+        string predictedName = ""; try { predictedName = predicted?.Title.GetFormattedText() ?? ""; } catch { }
+        LastRewardsSet = null;
+        rm.EventSynchronizer.ChooseLocalOption(buttons.IndexOf(exit));
+        if (!await WaitUntil(() => LastRewardsSet != null, 30, "legends rewards")) { Check("Legends exit potion", false, "no rewards offered"); return; }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var potionReward = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.PotionReward>().FirstOrDefault();
+        string? actual = potionReward?.Potion?.Id.Entry;
+        bool lineOk = pr != null && predictedName != "" && pr.Lines.Any(l => l.Contains(predictedName));
+        Check("Legends exit potion", predicted != null && actual == predicted.Id.Entry && lineOk, $"predicted [{predicted?.Id.Entry}] actual [{actual}] overlay lines [{(pr == null ? "" : string.Join("; ", pr.Lines))}]");
+        Shot("01_legends_reward");
+        // Leave the (non-terminal) rewards screen the way its proceed button does.
+        try
+        {
+            var screen = FindNodeByTypeName(((SceneTree)Engine.GetMainLoop()).Root, "NRewardsScreen");
+            if (screen != null) AccessTools.Method(screen.GetType(), "OnProceedButtonPressed")?.Invoke(screen, new object?[] { null });
+            else rm.RewardsSetSynchronizer.SkipLocalRewardsSet();
+        }
+        catch (Exception ex) { PLog.Write($"SELFTEST: leaving legends rewards: {ex.Message}"); }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        try { if ((NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 0) rm.EventSynchronizer.ChooseLocalOption(0); } catch (Exception ex) { PLog.Write($"SELFTEST: leaving legends: {ex.Message}"); }
+        for (int i = 0; i < 60; i++) await NextFrame();
+    }
+
+    private static Node? FindNodeByTypeName(Node root, string typeName)
+    {
+        if (root.GetType().Name == typeName) return root;
+        foreach (var child in root.GetChildren())
+        {
+            var found = FindNodeByTypeName(child, typeName);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
     private static async Task RestSiteTest(RunManager rm, IRunState rs)
     {
         var me = rs.Players[0];
@@ -807,5 +871,16 @@ internal static class Patch_NMainMenu_Ready
     public static void Postfix()
     {
         SelfTest.MaybeStart();
+    }
+}
+
+/// <summary>Self-test support: remember the rewards set the game offers (custom event rewards included).</summary>
+[HarmonyPatch(typeof(MegaCrit.Sts2.Core.Rewards.RewardsSet), "Offer")]
+internal static class SelfTest_RecordRewards
+{
+    [HarmonyPrefix]
+    public static void Prefix(MegaCrit.Sts2.Core.Rewards.RewardsSet __instance)
+    {
+        if (SelfTest.Running) SelfTest.LastRewardsSet = __instance;
     }
 }

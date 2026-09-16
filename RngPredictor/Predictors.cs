@@ -873,6 +873,7 @@ internal static class Predictors
         return ev.GetType().Name switch
         {
             "EndlessConveyor" => suffix is "OBSERVE_CHEF" or "SPICY_SNAPPY" or "JELLY_LIVER" or "SUSPICIOUS_CONDIMENT",
+            "TheLegendsWereTrue" => suffix == "SLOWLY_FIND_AN_EXIT",
             "AromaOfChaos" => suffix == "LET_GO",
             "WhisperingHollow" => suffix == "HUG",
             "Symbiote" => suffix == "KILL_WITH_FIRE",
@@ -919,10 +920,12 @@ internal static class Predictors
             return pr;
         }
 
-        // Random potion from the character + shared pools (Suspicious Condiment; uses the Rewards stream).
-        if (evName == "EndlessConveyor" && suffix == "SUSPICIOUS_CONDIMENT")
+        // Random potion from the character + shared pools via the Rewards stream: Endless Conveyor's Suspicious
+        // Condiment and The Legends Were True's "Slowly find an exit" (its HP loss does not touch the stream).
+        bool condiment = evName == "EndlessConveyor" && suffix == "SUSPICIOUS_CONDIMENT";
+        if (condiment || (evName == "TheLegendsWereTrue" && suffix == "SLOWLY_FIND_AN_EXIT"))
         {
-            pr.Title = L.T("可疑调味品 → 得到的药水", "Suspicious Condiment → potion");
+            pr.Title = condiment ? L.T("可疑调味品 → 得到的药水", "Suspicious Condiment → potion") : L.T("耐心寻找出口 → 得到的药水", "Slowly find an exit → potion");
             try
             {
                 IEnumerable<PotionModel> items = p.Character.PotionPool.GetUnlockedPotions(p.UnlockState)
