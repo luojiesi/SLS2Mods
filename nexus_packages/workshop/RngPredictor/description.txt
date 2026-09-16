@@ -29,7 +29,8 @@ Hover over anything with a random effect and see what it will actually do before
 [*] F8 toggles the overlay
 [*] Predictions refresh a few times per second while hovered, so if a relic or power consumes the same random stream first, the display corrects itself immediately
 [*] Singleplayer. No configuration, no dependencies, DLL only (game version 0.107 or newer)
-[*] Not covered yet: attack hit-count modifiers, relics that reorder shuffles, attack targets after an enemy dies mid-sequence (orbs do account for kills)
+[*] Random-target attacks and Lightning orbs track predicted HP: an enemy a hit would kill is dropped from the later draws (marked kill), and damage goes through the game's own modifiers (Strength, Vulnerable, block)
+[*] Not covered yet: relics that reorder shuffles; Frost / Dark / Plasma orb values are shown by name only
 [*] Inspired by the Slay the Spire 1 mod 随机数预测大师 (RandomNumberPredictionMaster) by FF; this is an independent rewrite for STS2
 [*] To report a problem, attach %APPDATA%\SlayTheSpire2\logs\RngPredictor.log
 [/list]
