@@ -118,7 +118,10 @@ Keyed by the model's C# type name (v0.107.1):
   Talon = curses, the shuffle relics = measured on a clone). Sere Talon (Niche curses, ordered by id, no
   repeats), Alchemical Coffer (`CombatPotionGeneration`), Sand Castle / War Paint / Whetstone / Fragrant
   Mushroom (`StableShuffle(upgradable, Niche).Take(N)`), Small Capsule / Toy Box (relic pulls), Lost Coffer
-  (3-card reward then a random potion on one Rewards stream, in reward order).
+  (3-card reward then a random potion on one Rewards stream, in reward order), Calling Bell (its
+  `GenerateRewards()` helper builds three fixed-rarity `RelicReward`s = common, uncommon, rare pulls on one
+  bag, no rarity roll) and Cauldron (N `PotionReward(player)` = N out-of-combat potions on the Rewards stream).
+  The audit scans whole relic classes, not only `AfterObtained`, because of such helpers.
 * **"Obtain a random relic"** (`Sim.PeekRelicsFromFront`): `RelicFactory.PullNextRelicFromFront` rolls the rarity
   with one Rewards draw (<0.5 common, <0.83 uncommon, else rare) and takes the first allowed relic of that
   rarity's deque in the player's `RelicGrabBag`, which was shuffled once at run start; the mod peeks at

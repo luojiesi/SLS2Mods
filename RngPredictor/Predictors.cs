@@ -686,7 +686,7 @@ internal static class Predictors
     private static readonly HashSet<string> RandomOnPickup = new()
     {
         "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice", "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster",
-        "CursedPearl", "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
+        "CursedPearl", "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "CallingBell", "Cauldron", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
         "WarPaint", "Whetstone",
     };
 
@@ -936,6 +936,33 @@ internal static class Predictors
                 foreach (var (card, upgraded) in cards) pr.Cards.Add(new PredCard(card, L.T("三选一", "Pick 1 of 3"), upgraded ? 1 : 0));
                 var pots = Sim.RandomPotions(p, 1, rewards, inCombatPool: false);
                 pr.Lines.Add(L.T("药水: ", "Potion: ") + string.Join(", ", pots.Select(Name)));
+                break;
+            }
+            case "CallingBell":
+            {
+                // GenerateRewards(): three RelicRewards with fixed rarities (common, uncommon, rare) = three
+                // PullNextRelicFromFront(player, rarity) calls on the same grab bag, no rarity roll.
+                pr.Title = relicName + L.T("：会获得的三件遗物（另加一张铃铛的诅咒）", ": the three relics you get (plus Curse of the Bell)");
+                var peek = new RelicPeek(p);
+                var names = new List<string>();
+                foreach (var rarity in new[] { MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.Common, MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.Uncommon, MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.Rare })
+                {
+                    var (r, _) = peek.Pull(rarity, _ => true);
+                    names.Add(r == null ? L.T("（遗物池将重新填充，无法预测）", "(relic pool refills, cannot predict)") : Name(r));
+                }
+                pr.Lines.Add(L.T("获得遗物: ", "Relics: ") + string.Join(", ", names));
+                break;
+            }
+            case "Cauldron":
+            {
+                // N PotionReward(player): each is one CreateRandomPotionOutOfCombat on the Rewards stream, in order.
+                int n = 5;
+                try { n = relic.DynamicVars["Potions"].IntValue; } catch { }
+                var rewards = Sim.Clone(p.PlayerRng.Rewards);
+                var pots = new List<PotionModel>();
+                for (int i = 0; i < n; i++) pots.AddRange(Sim.RandomPotions(p, 1, rewards, inCombatPool: false));
+                pr.Title = relicName + L.T("：会提供的药水", ": the potions offered");
+                pr.Lines.Add(string.Join(", ", pots.Select(Name)));
                 break;
             }
             case "LeafyPoultice":

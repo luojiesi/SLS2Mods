@@ -825,6 +825,35 @@ internal static class SelfTest
         }
         catch (Exception ex) { Check("Lost Coffer test ran", false, ex.Message); }
 
+        // Calling Bell: three fixed-rarity relic rewards
+        try
+        {
+            var bell = ModelDb.Relic<CallingBell>().ToMutable();
+            var pr = Predictors.ForNeowRelic(bell, me);
+            PLog.Write($"SELFTEST Calling Bell prediction: {(pr == null ? "(none)" : Describe(pr))}");
+            var deckBeforeBell = me.Deck.Cards.ToList();
+            LastRewardsSet = null;
+            var obtain = RelicCmd.Obtain(bell, me);
+            if (!await WaitUntil(() => LastRewardsSet != null && LastRewardsSet.Rewards.All(r => r.IsPopulated), 30, "calling bell rewards")) { Check("Calling Bell relics", false, "no rewards offered"); }
+            else
+            {
+                for (int i = 0; i < 20; i++) await NextFrame();
+                var offered = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.RelicReward>().ToList();
+                var names = new List<string>();
+                foreach (var r in offered) { try { names.Add(r.Relic?.Title.GetFormattedText() ?? "?"); } catch { names.Add("?"); } }
+                string line = pr?.Lines.FirstOrDefault() ?? "";
+                Check("Calling Bell relics", names.Count == 3 && line.EndsWith(string.Join(", ", names)), $"overlay [{line}] actual [{string.Join(", ", offered.Select(r => r.Relic?.Id.Entry))}]");
+            }
+            await CloseRewardsForTest();
+            await WaitForTask(obtain, 20, "calling bell obtain");
+            foreach (var c in me.Deck.Cards.Where(c => !deckBeforeBell.Contains(c) && c.Type == CardType.Curse).ToList())
+            {
+                try { await CardPileCmd.RemoveFromDeck(c, false); } catch (Exception ex) { PLog.Write($"SELFTEST: removing {c.Id.Entry}: {ex.Message}"); }
+            }
+            for (int i = 0; i < 20; i++) await NextFrame();
+        }
+        catch (Exception ex) { Check("Calling Bell test ran", false, ex.Message); }
+
         // Neow's Bones
         try
         {
