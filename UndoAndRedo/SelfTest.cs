@@ -122,7 +122,7 @@ internal static class SelfTest
             encounter.DebugRandomizeRng();
             Log.Write($"SELFTEST: jumping to encounter {encounter.Id.Entry}");
             for (int i = 0; i < 30; i++) await RewindEngine.NextFrame();
-            await rm.EnterRoomDebug(MegaCrit.Sts2.Core.Rooms.RoomType.Monster, MegaCrit.Sts2.Core.Map.MapPointType.Unassigned, encounter);
+            await (Task)InvokeWithDefaults(rm, "EnterRoomDebug", MegaCrit.Sts2.Core.Rooms.RoomType.Monster, MegaCrit.Sts2.Core.Map.MapPointType.Unassigned, encounter)!;
             rs = rm.DebugOnlyGetState()!;
             Log.Write($"SELFTEST: arrived, room = {rs.CurrentRoom?.GetType().Name} ({rs.CurrentRoom?.RoomType})");
         }
@@ -181,7 +181,9 @@ internal static class SelfTest
         await RewindEngine.WaitForIdlePlayPhase(30);
         for (int i = 0; i < 60; i++) await RewindEngine.NextFrame();
 
-        using var selectorScope = CardSelectCmd.UseSelector(new RandomCardSelector());
+        // Game methods with optional parameters are bound at compile time; the beta branch added parameters to
+        // these, so they are invoked through reflection with the current defaults filled in.
+        using var selectorScope = InvokeWithDefaults(null, "UseSelector", new RandomCardSelector(), typeof(CardSelectCmd)) as IDisposable;
         var me = rs.Players[0];
         var rec = ReplayRecorder.Current!;
         Log.Write($"SELFTEST: combat started, hand = {string.Join(",", me.PlayerCombatState!.Hand.Cards.Select(c => c.Id.Entry))}");
@@ -334,6 +336,25 @@ internal static class SelfTest
         return undone == depth && redone == undone && before.HasValue && before == after && finalOk && liveOk && visualsOk;
 
         static Player? me2() => RunManager.Instance.DebugOnlyGetState()?.Players[0];
+    }
+
+    /// <summary>
+    /// Calls <paramref name="name"/> on <paramref name="target"/> (or the static type given as the last argument when
+    /// target is null) with the given leading arguments, filling every remaining parameter with its default value.
+    /// </summary>
+    private static object? InvokeWithDefaults(object? target, string name, params object?[] args)
+    {
+        Type type;
+        if (target != null) type = target.GetType();
+        else { type = (Type)args[^1]!; args = args[..^1]; }
+        var m = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+            .Where(x => x.Name == name && x.GetParameters().Length >= args.Length)
+            .OrderBy(x => x.GetParameters().Length).First();
+        var ps = m.GetParameters();
+        var full = new object?[ps.Length];
+        for (int i = 0; i < ps.Length; i++)
+            full[i] = i < args.Length ? args[i] : (ps[i].HasDefaultValue ? ps[i].DefaultValue : (ps[i].ParameterType.IsValueType ? Activator.CreateInstance(ps[i].ParameterType) : null));
+        return m.Invoke(target, full);
     }
 
     private static void Shot(string name)

@@ -109,7 +109,7 @@ internal static class ShadowSnapshot
         var t = obj.GetType();
         if (IsLeaf(t)) { values[path] = Convert.ToString(obj, System.Globalization.CultureInfo.InvariantCulture) ?? ""; return; }
         if (IsSkippedType(t)) return;
-        if (obj is Rng rng) { values[path] = $"Rng(seed={rng.Seed},counter={rng.Counter})"; return; }
+        // Rng objects are walked like any other model object (their fields differ between game versions).
         if (obj is MegaCrit.Sts2.Core.Models.AbstractModel model && IsMutableProp?.GetValue(model) is false)
         {
             values[path] = "(canonical " + model.Id.Entry + ")";

@@ -81,6 +81,17 @@ Decompiled every subscribed mod and checked Harmony targets, cached combat nodes
 * General limit: the memento covers the game's model graph only. A mod that keeps per-combat gameplay state in
   its own statics would not be rewound. None of the current mods does.
 
+## Beta branch check (2026-09-16, public-beta v0.111.0)
+
+The released 2.2.1 DLL (built against 0.107.1) loads on the beta: every reflected member is present (the
+"Reflection:" lines all say OK) and the patches apply. The full self-test passes on the beta when the mod is
+compiled against it (8 decisions incl. potion and turn transitions, 8 undos, 8 redos, live play after undo).
+Differences seen: `INetGameService` gained `LocalVersion` (the 2.2.1 fix), `Rng` was rewritten (seed is `ulong`,
+counter private — irrelevant to the memento, which restores whatever fields exist), `CardSelectCmd.UseSelector`
+and `RunManager.EnterRoomDebug` gained optional parameters (self-test now calls them through reflection with
+defaults filled in). Rule: publish only DLLs built against the *release* assembly; optional parameters are bound
+at compile time, so a beta-built DLL can throw `MissingMethodException` on release and vice versa.
+
 ## If a game update breaks it
 
 1. Start the game once; `logs/UndoAndRedo.log` prints "Reflection:" / "FastPath reflection:" lines naming any
