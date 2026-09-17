@@ -123,7 +123,20 @@ Keyed by the model's C# type name (v0.107.1):
   (random potion from the character + shared pools via `PlayerRng.Rewards`; The Legends Were True's "Slowly find an
   exit" draws its potion the same way, after an HP loss that does not touch the stream), "Jelly Liver" and the transform
   options of Aroma of Chaos, Whispering Hollow, Symbiote, Morphic Grove and Trial (whole-deck "pick which →
-  becomes what" from the event's `Rng`; multi-card options show the 1st pick).
+  becomes what" from the event's `Rng`; multi-card options show the 1st pick). Since 1.5.0 every option whose
+  outcome is fixed the moment it is clicked is covered: random relics (Punch-Off nab, Round Tea Party fight,
+  Wongo's bargain bin = first common shop-allowed relic without a rarity roll, Trash Heap dive = event Rng over
+  its five fixed relics, Doll Room random = event Rng over the three dolls), random cards added to the deck
+  (Infested Automaton study / touch the core and Fried Eel via `Sim.CreateForReward` with the event's
+  `CardCreationOptions`, Trash Heap grab = event Rng over ten fixed cards), random potions (Potion Courier
+  ransack = uncommon only, Wellspring bottle), random upgrades / downgrades (Reflections: 2 downgrades then 4
+  upgrades where the downgraded cards are candidates again; Tablet of Truth: one random upgradable card, all of
+  them on the 5th decipher; Doors of Light and Dark: StableShuffle then Take N; Wongo's leave: one random
+  upgraded card downgraded) and Slippery Bridge's next requested card (same exclusion rules as the event).
+  Options that end in a "pick one of N" screen (Brain Leech, Room Full of Cheese, Colorful Philosophers, The
+  Future of Potions, Tinker Time) and rewards that come after a fight (Battleworn Dummy, Punch-Off fight) are
+  deliberately not predicted. Private lists are read with Harmony `AccessTools` (`_dolls`, `Relics`, `Cards`,
+  `_decipherCount`, `RandomCardToLose`, `SkippedRemovals`).
 * **Shuffle order**: hovering the draw or discard pile shows the draw pile after the next reshuffle (top
   first) both "if it happened now" (discard + draw pile, which is exactly what `CardPileCmd.Shuffle` shuffles)
   and "after the hand is discarded at end of turn". `StableShuffle` sorts first, so only the *set* matters.

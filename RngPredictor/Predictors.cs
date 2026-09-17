@@ -72,12 +72,15 @@ internal static class Predictors
     private static string Name(PotionModel p) { try { return p.Title.GetFormattedText(); } catch { return p.Id.Entry; } }
     private static string Name(OrbModel o) { try { return o.Title.GetFormattedText(); } catch { return o.Id.Entry; } }
     private static string Name(Creature c) { try { return c.Name; } catch { return "?"; } }
+    private static string Name(RelicModel r) { try { return r.Title.GetFormattedText(); } catch { return r.Id.Entry; } }
 
     private static void AddCards(Prediction pr, IEnumerable<CardModel> cards, string label = "", int upgrade = -1)
     {
         foreach (var c in cards)
             pr.Cards.Add(new PredCard(c, label, upgrade >= 0 ? upgrade : SafeUpgradeLevel(c)));
     }
+
+    private static bool SafeIsUpgradable(CardModel c) { try { return c.IsUpgradable; } catch { return false; } }
 
     private static int SafeUpgradeLevel(CardModel c)
     {
@@ -828,6 +831,8 @@ internal static class Predictors
         return ev.GetType().Name switch
         {
             "ThisOrThat" when suffix == "ORNATE" => 1,
+            "PunchOff" when suffix == "NAB" => 1,
+            "RoundTeaParty" when suffix is "PICK_FIGHT" or "CONTINUE_FIGHT" => 1,
             "RanwidTheElder" when suffix is "GOLD" or "POTION" => 1,
             "RanwidTheElder" when suffix == "RELIC" => 2, // trade one relic, get two
 
@@ -872,8 +877,18 @@ internal static class Predictors
         string suffix = OptionSuffix(textKey);
         return ev.GetType().Name switch
         {
-            "EndlessConveyor" => suffix is "OBSERVE_CHEF" or "SPICY_SNAPPY" or "JELLY_LIVER" or "SUSPICIOUS_CONDIMENT",
+            "EndlessConveyor" => suffix is "OBSERVE_CHEF" or "SPICY_SNAPPY" or "JELLY_LIVER" or "SUSPICIOUS_CONDIMENT" or "FRIED_EEL",
             "TheLegendsWereTrue" => suffix == "SLOWLY_FIND_AN_EXIT",
+            "PotionCourier" => suffix == "RANSACK",
+            "Wellspring" => suffix == "BOTTLE",
+            "InfestedAutomaton" => suffix is "STUDY" or "TOUCH_CORE",
+            "WelcomeToWongos" => suffix is "BARGAIN_BIN" or "LEAVE",
+            "TrashHeap" => suffix is "DIVE_IN" or "GRAB",
+            "DollRoom" => suffix == "RANDOM",
+            "Reflections" => suffix == "TOUCH_A_MIRROR",
+            "TabletOfTruth" => suffix.StartsWith("DECIPHER"),
+            "DoorsOfLightAndDark" => suffix == "LIGHT",
+            "SlipperyBridge" => suffix.StartsWith("HOLD_ON"),
             "AromaOfChaos" => suffix == "LET_GO",
             "WhisperingHollow" => suffix == "HUG",
             "Symbiote" => suffix == "KILL_WITH_FIRE",
@@ -898,6 +913,226 @@ internal static class Predictors
             return pr;
         }
 
+        Rng? EvRng() { try { return ev.Rng; } catch { return null; } }
+
+        // ── Random potion drawn with one Rewards NextItem over the unlocked character + shared potion pools ──
+        // (Endless Conveyor's Suspicious Condiment, The Legends Were True's exit, Potion Courier's Ransack
+        // (uncommon only), Wellspring's Bottle). HP loss before the draw does not touch the stream.
+        string? potionTitle = (evName, suffix) switch
+        {
+            ("EndlessConveyor", "SUSPICIOUS_CONDIMENT") => L.T("可疑调味品 → 得到的药水", "Suspicious Condiment → potion"),
+            ("TheLegendsWereTrue", "SLOWLY_FIND_AN_EXIT") => L.T("耐心寻找出口 → 得到的药水", "Slowly find an exit → potion"),
+            ("PotionCourier", "RANSACK") => L.T("洗劫 → 得到的药水", "Ransack → potion"),
+            ("Wellspring", "BOTTLE") => L.T("装瓶 → 得到的药水", "Bottle → potion"),
+            _ => null,
+        };
+        if (potionTitle != null)
+        {
+            pr.Title = potionTitle;
+            try
+            {
+                IEnumerable<PotionModel> items = p.Character.PotionPool.GetUnlockedPotions(p.UnlockState)
+                    .Concat(ModelDb.PotionPool<SharedPotionPool>().GetUnlockedPotions(p.UnlockState));
+                if (evName == "PotionCourier") items = items.Where(x => x.Rarity == PotionRarity.Uncommon);
+                var potion = Sim.Clone(p.PlayerRng.Rewards).NextItem(items);
+                if (potion == null) return null;
+                pr.Lines.Add(L.T("药水: ", "Potion: ") + Name(potion));
+            }
+            catch (System.Exception ex) { PLog.Write($"Potion option prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+
+        // ── One reward card added straight to the deck (CardFactory.CreateForReward with the event's options) ──
+        if (evName == "InfestedAutomaton" && suffix is "STUDY" or "TOUCH_CORE")
+        {
+            try
+            {
+                CardCreationOptions options = suffix == "STUDY"
+                    ? CardCreationOptions.ForNonCombatWithDefaultOdds(new[] { p.Character.CardPool }, c => c.Type == CardType.Power)
+                    : CardCreationOptions.ForNonCombatWithDefaultOdds(new[] { p.Character.CardPool }, c =>
+                        {
+                            var e = c.EnergyCost;
+                            return e != null && e.Canonical == 0 && !e.CostsX;
+                        }).WithFlags(CardCreationFlags.NoCardPoolModifications);
+                pr.Title = suffix == "STUDY"
+                    ? L.T("研究 → 加入牌组的能力牌", "Study → the Power added to your deck")
+                    : L.T("触碰核心 → 加入牌组的0费牌", "Touch the core → the 0-cost card added to your deck");
+                AddRewardCards(pr, p, 1, options, L.T("加入牌组", "Added to deck"));
+            }
+            catch (System.Exception ex) { PLog.Write($"Infested Automaton prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+        if (evName == "EndlessConveyor" && suffix == "FRIED_EEL")
+        {
+            try
+            {
+                var options = CardCreationOptions.ForNonCombatWithDefaultOdds(new CardPoolModel[] { ModelDb.CardPool<ColorlessCardPool>() });
+                pr.Title = L.T("炸鳗鱼 → 加入牌组的无色牌", "Fried Eel → the colorless card added to your deck");
+                AddRewardCards(pr, p, 1, options, L.T("加入牌组", "Added to deck"));
+            }
+            catch (System.Exception ex) { PLog.Write($"Fried Eel prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+
+        // ── Wongo's: bargain bin = next common shop-allowed relic (fixed rarity, no roll); leave = random downgrade ──
+        if (evName == "WelcomeToWongos" && suffix == "BARGAIN_BIN")
+        {
+            try
+            {
+                var (relic, note) = new RelicPeek(p).Pull(MegaCrit.Sts2.Core.Entities.Relics.RelicRarity.Common, r => r.IsAllowedInShops);
+                pr.Title = L.T("特价箱 → 会拿到的遗物", "Bargain bin → the relic you get");
+                pr.Lines.Add(L.T("获得遗物: ", "Relic: ") + (relic == null ? L.T("（遗物池将重新填充，无法预测）", "(relic pool refills, cannot predict)") : Name(relic)));
+            }
+            catch (System.Exception ex) { PLog.Write($"Bargain bin prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+        if (evName == "WelcomeToWongos" && suffix == "LEAVE")
+        {
+            var r = EvRng(); if (r == null) return null;
+            var upgraded = deck.Where(c => { try { return c.IsUpgraded; } catch { return false; } }).ToList();
+            pr.Title = L.T("离开 → 会被降级的牌", "Leave → the card that gets downgraded");
+            if (upgraded.Count == 0) { pr.Lines.Add(L.T("牌组里没有已升级的牌，不会降级任何牌", "No upgraded card in the deck: nothing is downgraded")); return pr; }
+            var card = Sim.Clone(r).NextItem(upgraded);
+            if (card == null) return null;
+            pr.CardScale = 0.45f;
+            pr.Cards.Add(new PredCard(card, L.T("降级", "Downgraded"), SafeUpgradeLevel(card)));
+            return pr;
+        }
+
+        // ── Trash Heap: one of five fixed relics / one of ten fixed cards, chosen with the event's Rng ──
+        if (evName == "TrashHeap" && suffix is "DIVE_IN" or "GRAB")
+        {
+            var r = EvRng(); if (r == null) return null;
+            try
+            {
+                if (suffix == "DIVE_IN")
+                {
+                    var relics = HarmonyLib.AccessTools.Property(ev.GetType(), "Relics")?.GetValue(null) as RelicModel[];
+                    var relic = relics == null ? null : Sim.Clone(r).NextItem(relics);
+                    if (relic == null) return null;
+                    pr.Title = L.T("潜入 → 会拿到的遗物", "Dive in → the relic you get");
+                    pr.Lines.Add(L.T("获得遗物: ", "Relic: ") + Name(relic));
+                }
+                else
+                {
+                    var cards = HarmonyLib.AccessTools.Property(ev.GetType(), "Cards")?.GetValue(null) as CardModel[];
+                    var card = cards == null ? null : Sim.Clone(r).NextItem(cards);
+                    if (card == null) return null;
+                    pr.Title = L.T("翻找 → 加入牌组的牌", "Grab → the card added to your deck");
+                    pr.CardScale = 0.45f;
+                    pr.Cards.Add(new PredCard(card, L.T("加入牌组", "Added to deck"), 0));
+                }
+            }
+            catch (System.Exception ex) { PLog.Write($"Trash Heap prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+
+        // ── Doll Room "choose at random": one of the three dolls' relics ──
+        if (evName == "DollRoom" && suffix == "RANDOM")
+        {
+            var r = EvRng(); if (r == null) return null;
+            try
+            {
+                var dolls = HarmonyLib.AccessTools.Field(ev.GetType(), "_dolls")?.GetValue(null) as System.Array;
+                if (dolls == null) return null;
+                var pick = Sim.Clone(r).NextItem(dolls.Cast<object>().ToList());
+                var relic = pick == null ? null : HarmonyLib.AccessTools.Field(pick.GetType(), "relic")?.GetValue(pick) as RelicModel;
+                if (relic == null) return null;
+                pr.Title = L.T("随机拿一个 → 会拿到的遗物", "Pick at random → the relic you get");
+                pr.Lines.Add(L.T("获得遗物: ", "Relic: ") + Name(relic));
+            }
+            catch (System.Exception ex) { PLog.Write($"Doll Room prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+
+        // ── Reflections "touch a mirror": 2 random upgraded cards are downgraded, then 4 random upgradable cards upgraded ──
+        if (evName == "Reflections" && suffix == "TOUCH_A_MIRROR")
+        {
+            var r0 = EvRng(); if (r0 == null) return null;
+            var r = Sim.Clone(r0);
+            var upgradedList = deck.Where(c => { try { return c.IsUpgraded; } catch { return false; } }).ToList();
+            var down = new List<CardModel>();
+            for (int i = 0; i < 2 && upgradedList.Count > 0; i++)
+            {
+                var c = r.NextItem(upgradedList);
+                if (c == null) break;
+                upgradedList.Remove(c);
+                down.Add(c);
+            }
+            // The upgradable list is built after the downgrades, so the downgraded cards are candidates again.
+            var upgradableList = deck.Where(c => down.Contains(c) || (SafeIsUpgradable(c))).ToList();
+            var up = new List<CardModel>();
+            for (int i = 0; i < 4 && upgradableList.Count > 0; i++)
+            {
+                var c = r.NextItem(upgradableList);
+                if (c == null) break;
+                upgradableList.Remove(c);
+                up.Add(c);
+            }
+            pr.Title = L.T("触摸镜子 → 降级2张，再升级4张", "Touch a mirror → 2 downgrades, then 4 upgrades");
+            pr.CardScale = 0.42f;
+            foreach (var c in down) pr.Cards.Add(new PredCard(c, L.T("降级", "Downgraded"), SafeUpgradeLevel(c)));
+            foreach (var c in up) pr.Cards.Add(new PredCard(c, L.T("升级", "Upgraded"), (down.Contains(c) ? SafeUpgradeLevel(c) - 1 : SafeUpgradeLevel(c)) + 1));
+            if (down.Count == 0) pr.Lines.Add(L.T("没有已升级的牌可降级", "No upgraded card to downgrade"));
+            if (up.Count == 0) pr.Lines.Add(L.T("没有可升级的牌", "No upgradable card"));
+            return pr;
+        }
+
+        // ── Tablet of Truth "decipher": one random upgradable card (the 5th decipher upgrades everything) ──
+        if (evName == "TabletOfTruth" && suffix.StartsWith("DECIPHER"))
+        {
+            var r = EvRng(); if (r == null) return null;
+            int decipherCount = 0;
+            try { decipherCount = (int)(HarmonyLib.AccessTools.Field(ev.GetType(), "_decipherCount")?.GetValue(ev) ?? 0); } catch { }
+            var upgradable = deck.Where(SafeIsUpgradable).ToList();
+            pr.Title = L.T("破译 → 会升级的牌", "Decipher → the card that gets upgraded");
+            if (decipherCount == 4) { pr.Lines.Add(L.T($"第5次破译：牌组里所有可升级的牌都会升级（{upgradable.Count}张）", $"5th decipher: every upgradable card in the deck is upgraded ({upgradable.Count})")); return pr; }
+            if (upgradable.Count == 0) { pr.Lines.Add(L.T("牌组里没有可升级的牌，不会升级任何牌", "No upgradable card in the deck: nothing is upgraded")); return pr; }
+            var card = Sim.Clone(r).NextItem(upgradable);
+            if (card == null) return null;
+            pr.CardScale = 0.45f;
+            pr.Cards.Add(new PredCard(card, Name(card) + " → " + Name(card) + "+", SafeUpgradeLevel(card) + 1));
+            return pr;
+        }
+
+        // ── Doors of Light and Dark "light": N random upgradable cards (StableShuffle, then Take) ──
+        if (evName == "DoorsOfLightAndDark" && suffix == "LIGHT")
+        {
+            var r = EvRng(); if (r == null) return null;
+            int n = 0;
+            try { n = ev.DynamicVars["Cards"].IntValue; } catch { }
+            var upgradable = deck.Where(SafeIsUpgradable).ToList();
+            var picked = Sim.ShuffleOrder(upgradable, Sim.Clone(r)).Take(n).ToList();
+            pr.Title = L.T($"光之门 → 会升级的{n}张牌", $"Light → the {n} cards that get upgraded");
+            if (picked.Count == 0) { pr.Lines.Add(L.T("牌组里没有可升级的牌", "No upgradable card in the deck")); return pr; }
+            pr.CardScale = 0.42f;
+            foreach (var c in picked) pr.Cards.Add(new PredCard(c, L.T("升级", "Upgraded"), SafeUpgradeLevel(c) + 1));
+            return pr;
+        }
+
+        // ── Slippery Bridge "hold on": the next random card the bridge will ask you to give up ──
+        if (evName == "SlipperyBridge" && suffix.StartsWith("HOLD_ON"))
+        {
+            var r = EvRng(); if (r == null) return null;
+            try
+            {
+                var current = HarmonyLib.AccessTools.Property(ev.GetType(), "RandomCardToLose")?.GetValue(ev) as CardModel;
+                var skipped = HarmonyLib.AccessTools.Property(ev.GetType(), "SkippedRemovals")?.GetValue(ev) as HashSet<CardModel>;
+                var list = current == null
+                    ? deck.Where(c => c.Rarity != CardRarity.Basic).ToList()
+                    : deck.Where(c => c.GetType() != current.GetType()).ToList();
+                list.RemoveAll(c => !c.IsRemovable || c == current || (skipped?.Contains(c) ?? false));
+                if (list.Count == 0) list = deck.Where(c => c.IsRemovable).ToList();
+                var next = Sim.Clone(r).NextItem(list);
+                if (next == null) return null;
+                pr.Title = L.T("坚持 → 下一张会被要求放弃的牌", "Hold on → the next card the bridge asks for");
+                pr.CardScale = 0.45f;
+                pr.Cards.Add(new PredCard(next, L.T("下一张", "Next"), SafeUpgradeLevel(next)));
+            }
+            catch (System.Exception ex) { PLog.Write($"Slippery Bridge prediction failed: {ex.Message}"); return null; }
+            return pr;
+        }
+
         Rng evRng;
         try { evRng = ev.Rng; } catch { return null; }
         if (evRng == null) return null;
@@ -917,24 +1152,6 @@ internal static class Predictors
             pr.CardScale = 0.45f;
             pr.Cards.Add(new PredCard(card, Name(card) + " → " + Name(card) + "+", SafeUpgradeLevel(card) + 1));
             pr.Lines.Add(L.T($"升级：{Name(card)}（共{upgradable.Count}张可升级）", $"Upgrades {Name(card)} ({upgradable.Count} upgradable cards)"));
-            return pr;
-        }
-
-        // Random potion from the character + shared pools via the Rewards stream: Endless Conveyor's Suspicious
-        // Condiment and The Legends Were True's "Slowly find an exit" (its HP loss does not touch the stream).
-        bool condiment = evName == "EndlessConveyor" && suffix == "SUSPICIOUS_CONDIMENT";
-        if (condiment || (evName == "TheLegendsWereTrue" && suffix == "SLOWLY_FIND_AN_EXIT"))
-        {
-            pr.Title = condiment ? L.T("可疑调味品 → 得到的药水", "Suspicious Condiment → potion") : L.T("耐心寻找出口 → 得到的药水", "Slowly find an exit → potion");
-            try
-            {
-                IEnumerable<PotionModel> items = p.Character.PotionPool.GetUnlockedPotions(p.UnlockState)
-                    .Concat(ModelDb.PotionPool<SharedPotionPool>().GetUnlockedPotions(p.UnlockState));
-                var potion = Sim.Clone(p.PlayerRng.Rewards).NextItem(items);
-                if (potion == null) return null;
-                pr.Lines.Add(L.T("药水: ", "Potion: ") + Name(potion));
-            }
-            catch (System.Exception ex) { PLog.Write($"Condiment prediction failed: {ex.Message}"); return null; }
             return pr;
         }
 

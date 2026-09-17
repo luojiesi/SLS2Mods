@@ -124,6 +124,14 @@ internal static class SelfTest
         try { await LegendsTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: legends test failed: {ex}"); Check("Legends test ran", false, ex.Message); }
 
+        // ── 0a3. Punch-Off nab (random relic reward), Trash Heap (event-Rng picks), Infested Automaton (reward card) ──
+        try { await PunchOffTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: punch-off test failed: {ex}"); Check("Punch-Off test ran", false, ex.Message); }
+        try { await TrashHeapTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: trash heap test failed: {ex}"); Check("Trash Heap test ran", false, ex.Message); }
+        try { await InfestedAutomatonTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: automaton test failed: {ex}"); Check("Infested Automaton test ran", false, ex.Message); }
+
         // ── 0b. Endless Conveyor: hover the options, then "observe the chef" (random upgrade) ──
         try { await ConveyorTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: conveyor test failed: {ex}"); Check("Conveyor test ran", false, ex.Message); }
@@ -658,6 +666,108 @@ internal static class SelfTest
             if (found != null) return found;
         }
         return null;
+    }
+
+    /// <summary>Enter an event by id and wait for its option buttons.</summary>
+    private static async Task<List<MegaCrit.Sts2.Core.Nodes.Events.NEventOptionButton>?> EnterEventForTest(RunManager rm, IRunState rs, string id)
+    {
+        var eventModel = ModelDb.AllEvents.FirstOrDefault(e => e.Id.Entry == id);
+        if (eventModel == null) { PLog.Write($"SELFTEST: {id} not found; skipping"); return null; }
+        PLog.Write($"SELFTEST: entering {id}");
+        rs.AppendToMapPointHistory(MegaCrit.Sts2.Core.Map.MapPointType.Unknown, MegaCrit.Sts2.Core.Rooms.RoomType.Event, eventModel.Id);
+        await rm.EnterRoom(new EventRoom(eventModel));
+        if (!await WaitUntil(() => (NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 1, 30, id + " options")) return null;
+        for (int i = 0; i < 30; i++) await NextFrame();
+        return NEventRoom.Instance!.Layout!.OptionButtons.ToList();
+    }
+
+    private static async Task<Prediction?> HoverOptionForTest(MegaCrit.Sts2.Core.Nodes.Events.NEventOptionButton button, Player me, string shot)
+    {
+        button.GrabFocus();
+        for (int i = 0; i < 8; i++) await NextFrame();
+        var ev = AccessTools.Field(typeof(NEventRoom), "_event")?.GetValue(NEventRoom.Instance) as EventModel;
+        var pr = ev != null ? Predictors.ForEventOption(ev, button.Option!.TextKey, me) : null;
+        PLog.Write($"SELFTEST hover {button.Option!.TextKey}: {(pr == null ? "(none)" : Describe(pr))} overlayShowing={PredictionManager.OverlayShowing}");
+        Shot(shot);
+        button.ReleaseFocus();
+        for (int i = 0; i < 3; i++) await NextFrame();
+        return pr;
+    }
+
+    private static async Task LeaveEventForTest(RunManager rm)
+    {
+        try
+        {
+            var screen = FindNodeByTypeName(((SceneTree)Engine.GetMainLoop()).Root, "NRewardsScreen");
+            if (screen != null) AccessTools.Method(screen.GetType(), "OnProceedButtonPressed")?.Invoke(screen, new object?[] { null });
+        }
+        catch (Exception ex) { PLog.Write($"SELFTEST: closing rewards: {ex.Message}"); }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        try { if ((NEventRoom.Instance?.Layout?.OptionButtons.Count() ?? 0) > 0) rm.EventSynchronizer.ChooseLocalOption(0); } catch (Exception ex) { PLog.Write($"SELFTEST: leaving event: {ex.Message}"); }
+        for (int i = 0; i < 60; i++) await NextFrame();
+    }
+
+    /// <summary>Punch-Off "nab": Injury + a random relic offered as a reward (the reported bug).</summary>
+    private static async Task PunchOffTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        var buttons = await EnterEventForTest(rm, rs, "PUNCH_OFF");
+        if (buttons == null) return;
+        var nab = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("NAB"));
+        if (nab == null) { Check("punch-off nab option present", false, string.Join(",", buttons.Select(b => b.Option?.TextKey))); return; }
+        var pr = await HoverOptionForTest(nab, me, "00_punch_off");
+        Check("Punch-Off nab hover shows a relic", pr != null && pr.Lines.Count > 0, $"lines {pr?.Lines.Count}");
+        var peek = Sim.PeekRelicsFromFront(me, 1).FirstOrDefault().relic;
+        LastRewardsSet = null;
+        rm.EventSynchronizer.ChooseLocalOption(buttons.IndexOf(nab));
+        if (!await WaitUntil(() => LastRewardsSet != null, 30, "punch-off rewards")) { Check("Punch-Off nab relic", false, "no rewards offered"); return; }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var relicReward = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.RelicReward>().FirstOrDefault();
+        string? actual = relicReward?.Relic?.Id.Entry;
+        string actualName = ""; try { actualName = relicReward?.Relic?.Title.GetFormattedText() ?? ""; } catch { }
+        Check("Punch-Off nab relic", peek != null && actual == peek.Id.Entry && pr != null && pr.Lines.Any(l => l.Contains(actualName)), $"predicted [{peek?.Id.Entry}] actual [{actual}] overlay [{(pr == null ? "" : string.Join("; ", pr.Lines))}]");
+        await LeaveEventForTest(rm);
+    }
+
+    /// <summary>Trash Heap: event-Rng pick among fixed relics (dive in) and fixed cards (grab).</summary>
+    private static async Task TrashHeapTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        var buttons = await EnterEventForTest(rm, rs, "TRASH_HEAP");
+        if (buttons == null) return;
+        var grab = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("GRAB"));
+        var dive = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("DIVE_IN"));
+        if (grab == null || dive == null) { Check("trash heap options present", false, string.Join(",", buttons.Select(b => b.Option?.TextKey))); return; }
+        var prGrab = await HoverOptionForTest(grab, me, "00_trash_grab");
+        Check("Trash Heap grab hover shows a card", prGrab != null && prGrab.Cards.Count == 1, $"cards {prGrab?.Cards.Count}");
+        var prDive = await HoverOptionForTest(dive, me, "01_trash_dive");
+        var relicsBefore = me.Relics.ToList();
+        rm.EventSynchronizer.ChooseLocalOption(buttons.IndexOf(dive));
+        if (!await WaitUntil(() => me.Relics.Count > relicsBefore.Count, 30, "trash heap relic")) { Check("Trash Heap dive relic", false, "timeout"); return; }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var gained = me.Relics.Where(r => !relicsBefore.Contains(r)).ToList();
+        string gainedName = ""; try { gainedName = gained.FirstOrDefault()?.Title.GetFormattedText() ?? ""; } catch { }
+        Check("Trash Heap dive relic", gained.Count == 1 && prDive != null && gainedName != "" && prDive.Lines.Any(l => l.Contains(gainedName)), $"actual [{string.Join(",", gained.Select(r => r.Id.Entry))}] overlay [{(prDive == null ? "" : string.Join("; ", prDive.Lines))}]");
+        await LeaveEventForTest(rm);
+    }
+
+    /// <summary>Infested Automaton "touch the core": one 0-cost reward card added to the deck (CreateForReward with a filter and flags).</summary>
+    private static async Task InfestedAutomatonTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        var buttons = await EnterEventForTest(rm, rs, "INFESTED_AUTOMATON");
+        if (buttons == null) return;
+        var core = buttons.FirstOrDefault(b => (b.Option?.TextKey ?? "").EndsWith("TOUCH_CORE"));
+        if (core == null) { Check("automaton core option present", false, string.Join(",", buttons.Select(b => b.Option?.TextKey))); return; }
+        var pr = await HoverOptionForTest(core, me, "00_automaton_core");
+        string predicted = pr?.Cards.FirstOrDefault()?.Card.Id.Entry ?? "";
+        var deckBefore = me.Deck.Cards.ToList();
+        rm.EventSynchronizer.ChooseLocalOption(buttons.IndexOf(core));
+        if (!await WaitUntil(() => me.Deck.Cards.Count > deckBefore.Count, 30, "automaton card")) { Check("Infested Automaton core card", false, "timeout"); return; }
+        for (int i = 0; i < 30; i++) await NextFrame();
+        var added = me.Deck.Cards.Where(c => !deckBefore.Contains(c)).Select(c => c.Id.Entry).ToList();
+        Check("Infested Automaton core card", added.Count == 1 && added[0] == predicted, $"predicted [{predicted}] actual [{string.Join(",", added)}]");
+        await LeaveEventForTest(rm);
     }
 
     private static async Task RestSiteTest(RunManager rm, IRunState rs)

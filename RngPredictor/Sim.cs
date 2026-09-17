@@ -242,50 +242,16 @@ internal static class Sim
     /// first allowed relic of that rarity's pre-shuffled deque (falling through common → uncommon → rare → the
     /// multiplayer fallback deque → Circlet). A deque that is empty and would be refilled cannot be predicted.
     /// </summary>
-    public static List<(RelicModel? relic, string note)> PeekRelicsFromFront(Player p, int count)
+    public static List<(RelicModel? relic, string note)> PeekRelicsFromFront(Player p, int count, Rng? rewards = null)
     {
+        var peek = new RelicPeek(p);
+        var r = rewards ?? Clone(p.PlayerRng.Rewards);
         var results = new List<(RelicModel?, string)>();
-        var bag = p.RelicGrabBag;
-        var deques = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, System.Collections.Generic.Dictionary<RelicRarity, List<RelicModel>>>("_deques")(bag);
-        var fallback = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, List<RelicModel>>("_mpFallbackDequeue")(bag);
-        bool refreshAllowed = HarmonyLib.AccessTools.FieldRefAccess<RelicGrabBag, bool>("_refreshAllowed")(bag);
-        var runState = p.RunState;
-        // Work on allowed-only copies so nothing in the real bag is touched.
-        var copies = new System.Collections.Generic.Dictionary<RelicRarity, List<RelicModel>>();
-        foreach (var (rarity, list) in deques)
-            copies[rarity] = list.Where(r => r.IsAllowed(runState)).ToList();
-        var fallbackCopy = fallback.Where(r => r.IsAllowed(runState)).ToList();
-        var rewards = Clone(p.PlayerRng.Rewards);
         for (int i = 0; i < count; i++)
         {
-            float f = rewards.NextFloat();
-            var rarity = f < 0.5f ? RelicRarity.Common : (f < 0.83f ? RelicRarity.Uncommon : RelicRarity.Rare);
-            List<RelicModel>? list = copies.TryGetValue(rarity, out var l) ? l : new List<RelicModel>();
-            if (list.Count == 0 && refreshAllowed)
-            {
-                results.Add((null, "pool refills"));
-                break;
-            }
-            while (list != null && list.Count == 0)
-            {
-                rarity = rarity switch
-                {
-                    RelicRarity.Shop => RelicRarity.Common,
-                    RelicRarity.Common => RelicRarity.Uncommon,
-                    RelicRarity.Uncommon => RelicRarity.Rare,
-                    _ => RelicRarity.None,
-                };
-                list = rarity == RelicRarity.None ? null : (copies.TryGetValue(rarity, out var l2) ? l2 : new List<RelicModel>());
-            }
-            if (list == null && fallbackCopy.Count > 0) list = fallbackCopy;
-            if (list == null || list.Count == 0)
-            {
-                results.Add((RelicFactory.FallbackRelic, ""));
-                continue;
-            }
-            var relic = list[0];
-            list.RemoveAt(0);
-            results.Add((relic, ""));
+            var pull = peek.PullRolled(r);
+            results.Add(pull);
+            if (pull.relic == null) break;
         }
         return results;
     }
