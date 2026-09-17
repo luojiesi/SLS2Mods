@@ -676,6 +676,84 @@ internal static class Predictors
     /// Hovering an event option that grants a deck-transforming relic (New Leaf, Astrolabe, Pandora's Box,
     /// Leafy Poultice): what every eligible deck card would turn into, before the option is chosen.
     /// </summary>
+    /// <summary>Relics whose AfterObtained draws from RunState.Rng.Niche (they shift a Niche draw that happens after them).</summary>
+    private static readonly HashSet<string> NicheOnPickup = new()
+    {
+        "NewLeaf", "Astrolabe", "PandorasBox", "SereTalon", "NeowsBones", "FragrantMushroom", "SandCastle", "WarPaint", "Whetstone",
+    };
+
+    /// <summary>Relics with a random pickup effect that this mod predicts when they are hovered directly.</summary>
+    private static readonly HashSet<string> RandomOnPickup = new()
+    {
+        "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice", "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster",
+        "CursedPearl", "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
+        "WarPaint", "Whetstone",
+    };
+
+    /// <summary>
+    /// Mirror of the "random curses" loop of Neow's Bones / Sere Talon: Niche.NextItem over the unlocked curses that
+    /// modifiers may generate, ordered by id, without repeats.
+    /// </summary>
+    /// <summary>
+    /// Number of RunState.Rng.Niche draws a relic makes in AfterObtained (null = unknown). One NextItem per random
+    /// transformation, one per curse, and whatever a StableShuffle of the candidate list takes (measured on a clone).
+    /// </summary>
+    private static int? NicheDrawsOnPickup(RelicModel r, Player p, List<CardModel> deck)
+    {
+        string t = r.GetType().Name;
+        if (!NicheOnPickup.Contains(t)) return 0;
+        try
+        {
+            switch (t)
+            {
+                case "NewLeaf":
+                case "Astrolabe":
+                    return r.DynamicVars["Cards"].IntValue;
+                case "PandorasBox":
+                    return deck.Count(c => { try { return c.IsBasicStrikeOrDefend && c.IsRemovable; } catch { return false; } });
+                case "SereTalon":
+                    return r.DynamicVars["Curses"].IntValue;
+                case "FragrantMushroom":
+                case "SandCastle":
+                case "WarPaint":
+                case "Whetstone":
+                {
+                    var pool = deck.Where(c => c != null && SafeIsUpgradable(c)
+                        && (t != "WarPaint" || c.Type == CardType.Skill)
+                        && (t != "Whetstone" || c.Type == CardType.Attack)).ToList();
+                    var clone = Sim.Clone(p.RunState.Rng.Niche);
+                    int before = clone.Counter;
+                    Sim.ShuffleOrder(pool, clone);
+                    return clone.Counter - before;
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static void AddRandomCurses(Prediction pr, Player p, int count, bool uncertain, int nicheAhead = 0)
+    {
+        try
+        {
+            var curses = ModelDb.CardPool<CurseCardPool>().GetUnlockedCards(p.UnlockState, p.RunState.CardMultiplayerConstraint)
+                .Where(c => c.CanBeGeneratedByModifiers).OrderBy(c => c.Id).ToList();
+            var niche = p.RunState.Rng.Niche;
+            var r = new Rng(niche.Seed, niche.Counter + nicheAhead);
+            pr.CardScale = 0.45f;
+            for (int i = 0; i < count; i++)
+            {
+                var c = r.NextItem(curses);
+                if (c == null) break;
+                curses.Remove(c);
+                pr.Cards.Add(new PredCard(c, L.T("诅咒", "Curse") + (uncertain ? " ?" : ""), 0));
+            }
+            if (uncertain)
+                pr.Lines.Add(L.T("诅咒在领取上面的遗物之后才抽；其中有遗物会先消耗同一条随机数，实际诅咒可能不同", "The curse is drawn after you claim the relics above; one of them uses the same random stream first, so the curse may differ"));
+        }
+        catch (System.Exception ex) { PLog.Write($"curse prediction failed: {ex.Message}"); }
+    }
+
     public static Prediction? ForNeowRelic(RelicModel relic, Player p)
     {
         string type = relic.GetType().Name;
@@ -763,6 +841,101 @@ internal static class Predictors
                 var pots = Sim.RandomPotions(p, 1, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
                 pr.Title = relicName + L.T("：会获得的药水", ": potion you get");
                 pr.Lines.Add(string.Join(", ", pots.Select(Name)));
+                break;
+            }
+            case "NeowsBones":
+            {
+                // AfterObtained: Rewards.Shuffle(valid Neow relics).Take(N) are offered (skipping disallowed), and only
+                // after they are claimed the curse is drawn from Niche.
+                int nRelics = 2, nCurses = 1;
+                try { nRelics = relic.DynamicVars["Relics"].IntValue; } catch { }
+                try { nCurses = relic.DynamicVars["Curses"].IntValue; } catch { }
+                var valid = (HarmonyLib.AccessTools.Method(relic.GetType(), "GetValidRelics")?.Invoke(null, new object[] { p }) as IEnumerable<RelicModel>)?.ToList();
+                if (valid == null) return null;
+                Sim.Clone(p.PlayerRng.Rewards).Shuffle(valid);
+                var picked = valid.Take(nRelics).ToList();
+                pr.Title = relicName + L.T("：会获得的遗物和诅咒", ": the relics and the curse you get");
+                pr.Lines.Add(L.T("获得遗物: ", "Relics: ") + string.Join(", ", picked.Select(Name)));
+                // The curse is drawn after both relics are claimed; every Rng draw is exactly one generator step
+                // (Rng.FastForwardCounter relies on that), so relics that use Niche first just shift the stream.
+                int nicheAhead = 0;
+                bool nicheUnknown = false;
+                foreach (var r in picked)
+                {
+                    int? k = NicheDrawsOnPickup(r, p, deck);
+                    if (k == null) nicheUnknown = true; else nicheAhead += k.Value;
+                }
+                AddRandomCurses(pr, p, nCurses, nicheUnknown, nicheAhead);
+                if (nicheAhead > 0 && !nicheUnknown)
+                    pr.Lines.Add(L.T($"诅咒已按「先领取上面的遗物（它们先用掉 {nicheAhead} 次随机数）」推算", $"Curse computed for after the relics above are claimed (they use {nicheAhead} draws of the same stream first)"));
+                if (picked.Any(r => RandomOnPickup.Contains(r.GetType().Name)))
+                    pr.Lines.Add(L.T("其中带随机效果的遗物，要到领取时才结算它自己的随机结果", "A relic above with its own random effect rolls it when you claim it"));
+                break;
+            }
+            case "SereTalon":
+            {
+                int nCurses = 2, nWishes = 0;
+                try { nCurses = relic.DynamicVars["Curses"].IntValue; } catch { }
+                try { nWishes = relic.DynamicVars["Wishes"].IntValue; } catch { }
+                pr.Title = relicName + L.T("：会加入牌组的诅咒", ": the curses added to your deck");
+                AddRandomCurses(pr, p, nCurses, false);
+                if (nWishes > 0) pr.Lines.Add(L.T($"另外获得 {nWishes} 张愿望", $"Plus {nWishes} Wish"));
+                break;
+            }
+            case "AlchemicalCoffer":
+            {
+                int n = 4;
+                try { n = relic.DynamicVars["PotionSlots"].IntValue; } catch { }
+                var pots = Sim.RandomPotions(p, n, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
+                pr.Title = relicName + L.T("：会获得的药水", ": potions you get");
+                pr.Lines.Add(string.Join(", ", pots.Select(Name)));
+                break;
+            }
+            case "FragrantMushroom":
+            case "SandCastle":
+            case "WarPaint":
+            case "Whetstone":
+            {
+                // StableShuffle(upgradable cards, Niche).Take(Cards)
+                int n = 1;
+                try { n = relic.DynamicVars["Cards"].IntValue; } catch { }
+                var pool = deck.Where(c => c != null && SafeIsUpgradable(c)
+                    && (type != "WarPaint" || c.Type == CardType.Skill)
+                    && (type != "Whetstone" || c.Type == CardType.Attack)).ToList();
+                var picked = Sim.ShuffleOrder(pool, Sim.Clone(p.RunState.Rng.Niche)).Take(n).ToList();
+                pr.Title = relicName + L.T($"：会升级的{n}张牌", $": the {n} cards that get upgraded");
+                pr.CardScale = 0.42f;
+                pr.CardsPerRow = 6;
+                foreach (var c in picked) pr.Cards.Add(new PredCard(c, L.T("升级", "Upgraded"), SafeUpgradeLevel(c) + 1));
+                if (picked.Count == 0) pr.Lines.Add(L.T("牌组里没有符合条件的可升级牌", "No matching upgradable card in the deck"));
+                break;
+            }
+            case "SmallCapsule":
+            {
+                pr.Title = relicName + L.T("：会获得的遗物", ": the relic you get");
+                AddRelicPulls(pr, p, 1);
+                break;
+            }
+            case "ToyBox":
+            {
+                int n = 3;
+                try { n = relic.DynamicVars["Relics"].IntValue; } catch { }
+                pr.Title = relicName + L.T("：会获得的蜡制遗物", ": the wax relics you get");
+                AddRelicPulls(pr, p, n);
+                break;
+            }
+            case "LostCoffer":
+            {
+                // Rewards are populated in order with one Rewards stream: the 3-card reward, then the random potion.
+                var rewards = Sim.Clone(p.PlayerRng.Rewards);
+                var options = new CardCreationOptions(new[] { p.Character.CardPool }, CardCreationSource.Other, CardRarityOddsType.RegularEncounter);
+                var cards = Sim.CreateForReward(p, 3, options, rewards);
+                pr.Title = relicName + L.T("：三选一的牌和会获得的药水", ": the 3 cards offered and the potion you get");
+                pr.CardScale = 0.42f;
+                pr.CardsPerRow = 6;
+                foreach (var (card, upgraded) in cards) pr.Cards.Add(new PredCard(card, L.T("三选一", "Pick 1 of 3"), upgraded ? 1 : 0));
+                var pots = Sim.RandomPotions(p, 1, rewards, inCombatPool: false);
+                pr.Lines.Add(L.T("药水: ", "Potion: ") + string.Join(", ", pots.Select(Name)));
                 break;
             }
             case "LeafyPoultice":

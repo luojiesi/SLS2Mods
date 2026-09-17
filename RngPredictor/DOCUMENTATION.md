@@ -110,6 +110,15 @@ Keyed by the model's C# type name (v0.107.1):
   `NoUpgradeRoll`. `Hook.ModifyCardRewardCreationOptions` / `ModifyCardRewardUpgradeOdds` are applied like the
   game does. A shadow patch on `CreateForReward` verifies this on every real card reward too. Phial Holster and
   Cursed Pearl reuse the potion simulation.
+* **Other relics with a random pickup effect** (audited every `RelicModel.AfterObtained`): Neow's Bones =
+  `Rewards.Shuffle(valid Neow relics).Take(2)` offered with skipping disallowed, then its curse from `Niche`
+  after both are claimed. Every `Rng` draw is exactly one generator step (`Rng.FastForwardCounter` relies on
+  it), so the curse is computed on `new Rng(seed, counter + k)` where k = the Niche draws the two relics make
+  first (`NicheDrawsOnPickup`: New Leaf / Astrolabe = cards transformed, Pandora's Box = basic cards, Sere
+  Talon = curses, the shuffle relics = measured on a clone). Sere Talon (Niche curses, ordered by id, no
+  repeats), Alchemical Coffer (`CombatPotionGeneration`), Sand Castle / War Paint / Whetstone / Fragrant
+  Mushroom (`StableShuffle(upgradable, Niche).Take(N)`), Small Capsule / Toy Box (relic pulls), Lost Coffer
+  (3-card reward then a random potion on one Rewards stream, in reward order).
 * **"Obtain a random relic"** (`Sim.PeekRelicsFromFront`): `RelicFactory.PullNextRelicFromFront` rolls the rarity
   with one Rewards draw (<0.5 common, <0.83 uncommon, else rare) and takes the first allowed relic of that
   rarity's deque in the player's `RelicGrabBag`, which was shuffled once at run start; the mod peeks at

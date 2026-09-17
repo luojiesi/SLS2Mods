@@ -132,6 +132,10 @@ internal static class SelfTest
         try { await InfestedAutomatonTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: automaton test failed: {ex}"); Check("Infested Automaton test ran", false, ex.Message); }
 
+        // ── 0a4. Relics with a random pickup effect: Sand Castle, Lost Coffer, Neow's Bones ──
+        try { await PickupRelicTest(rm, rs); }
+        catch (Exception ex) { PLog.Write($"SELFTEST: pickup relic test failed: {ex}"); Check("Pickup relic test ran", false, ex.Message); }
+
         // ── 0b. Endless Conveyor: hover the options, then "observe the chef" (random upgrade) ──
         try { await ConveyorTest(rm, rs); }
         catch (Exception ex) { PLog.Write($"SELFTEST: conveyor test failed: {ex}"); Check("Conveyor test ran", false, ex.Message); }
@@ -768,6 +772,125 @@ internal static class SelfTest
         var added = me.Deck.Cards.Where(c => !deckBefore.Contains(c)).Select(c => c.Id.Entry).ToList();
         Check("Infested Automaton core card", added.Count == 1 && added[0] == predicted, $"predicted [{predicted}] actual [{string.Join(",", added)}]");
         await LeaveEventForTest(rm);
+    }
+
+    /// <summary>
+    /// Relics with a random pickup effect: Sand Castle (Niche upgrades), Lost Coffer (card reward + potion on one
+    /// Rewards stream) and Neow's Bones (Rewards.Shuffle of the Neow relics, then a Niche curse).
+    /// </summary>
+    private static async Task PickupRelicTest(RunManager rm, IRunState rs)
+    {
+        var me = rs.Players[0];
+        using var selectorScope = CardSelectCmd.UseSelector(new RecordingSelector());
+
+        // Sand Castle
+        try
+        {
+            var castle = ModelDb.Relic<SandCastle>().ToMutable();
+            var pr = Predictors.ForNeowRelic(castle, me);
+            PLog.Write($"SELFTEST Sand Castle prediction: {(pr == null ? "(none)" : Describe(pr))}");
+            var levels = me.Deck.Cards.ToDictionary(c => c, c => c.CurrentUpgradeLevel);
+            await RelicCmd.Obtain(castle, me);
+            for (int i = 0; i < 40; i++) await NextFrame();
+            var upgraded = me.Deck.Cards.Where(c => levels.TryGetValue(c, out var l) && c.CurrentUpgradeLevel > l).ToList();
+            var predicted = pr?.Cards.Select(c => c.Card).ToList() ?? new List<CardModel>();
+            bool same = predicted.Count > 0 && predicted.Count == upgraded.Count && predicted.All(upgraded.Contains);
+            Check("Sand Castle upgrades", same, $"predicted [{string.Join(",", predicted.Select(c => c.Id.Entry))}] actual [{string.Join(",", upgraded.Select(c => c.Id.Entry))}]");
+        }
+        catch (Exception ex) { Check("Sand Castle test ran", false, ex.Message); }
+
+        // Lost Coffer
+        try
+        {
+            var coffer = ModelDb.Relic<LostCoffer>().ToMutable();
+            var pr = Predictors.ForNeowRelic(coffer, me);
+            PLog.Write($"SELFTEST Lost Coffer prediction: {(pr == null ? "(none)" : Describe(pr))}");
+            var predictedPotion = "";
+            try { predictedPotion = Sim.RandomPotions(me, 1, AdvanceForCoffer(me), false).FirstOrDefault()?.Id.Entry ?? ""; } catch { }
+            LastRewardsSet = null;
+            var obtain = RelicCmd.Obtain(coffer, me);
+            if (!await WaitUntil(() => LastRewardsSet != null && LastRewardsSet.Rewards.All(r => r.IsPopulated), 30, "lost coffer rewards")) { Check("Lost Coffer rewards", false, "no rewards offered"); }
+            else
+            {
+                for (int i = 0; i < 20; i++) await NextFrame();
+                var cardReward = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.CardReward>().FirstOrDefault();
+                var potionReward = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.PotionReward>().FirstOrDefault();
+                string actualCards = cardReward == null ? "" : string.Join(",", cardReward.Cards.Select(c => c.Id.Entry + (c.IsUpgraded ? "+" : "")));
+                string predictedCards = pr == null ? "" : string.Join(",", pr.Cards.Select(c => c.Card.Id.Entry + (c.UpgradeLevel > 0 ? "+" : "")));
+                string actualPotion = potionReward?.Potion?.Id.Entry ?? "";
+                Check("Lost Coffer cards and potion", predictedCards != "" && predictedCards == actualCards && predictedPotion == actualPotion && actualPotion != "", $"predicted [{predictedCards} | {predictedPotion}] actual [{actualCards} | {actualPotion}]");
+            }
+            await CloseRewardsForTest();
+            await WaitForTask(obtain, 20, "lost coffer obtain");
+        }
+        catch (Exception ex) { Check("Lost Coffer test ran", false, ex.Message); }
+
+        // Neow's Bones
+        try
+        {
+            var bones = ModelDb.Relic<NeowsBones>().ToMutable();
+            var pr = Predictors.ForNeowRelic(bones, me);
+            PLog.Write($"SELFTEST Neow's Bones prediction: {(pr == null ? "(none)" : Describe(pr))}");
+            bool curseUncertain = pr != null && pr.Cards.Any(c => c.Label.Contains("?"));
+            var deckBefore = me.Deck.Cards.ToList();
+            LastRewardsSet = null;
+            var obtain = RelicCmd.Obtain(bones, me);
+            if (!await WaitUntil(() => LastRewardsSet != null, 30, "bones rewards")) { Check("Neow's Bones relics", false, "no rewards offered"); return; }
+            for (int i = 0; i < 20; i++) await NextFrame();
+            var offered = LastRewardsSet!.Rewards.OfType<MegaCrit.Sts2.Core.Rewards.RelicReward>().ToList();
+            var names = new List<string>();
+            foreach (var r in offered) { try { names.Add(r.Relic?.Title.GetFormattedText() ?? "?"); } catch { names.Add("?"); } }
+            string line = pr?.Lines.FirstOrDefault() ?? "";
+            Check("Neow's Bones relics", names.Count == 2 && names.All(n => line.Contains(n)), $"overlay [{line}] actual [{string.Join(", ", offered.Select(r => r.Relic?.Id.Entry))}]");
+            // Skipping is disallowed: claim both so the curse is drawn.
+            foreach (var r in offered)
+            {
+                try { await rm.RewardsSetSynchronizer.SelectLocalReward(r); } catch (Exception ex) { PLog.Write($"SELFTEST: claiming {r.Relic?.Id.Entry}: {ex.Message}"); }
+                for (int i = 0; i < 40; i++) await NextFrame();
+                await CloseRewardsForTest(onlyNested: true);
+            }
+            await CloseRewardsForTest();
+            await WaitForTask(obtain, 40, "bones obtain");
+            for (int i = 0; i < 30; i++) await NextFrame();
+            var curses = me.Deck.Cards.Where(c => !deckBefore.Contains(c) && c.Type == CardType.Curse).Select(c => c.Id.Entry).ToList();
+            var predictedCurse = pr?.Cards.Select(c => c.Card.Id.Entry).ToList() ?? new List<string>();
+            if (curseUncertain) PLog.Write($"SELFTEST Neow's Bones curse (flagged uncertain): predicted [{string.Join(",", predictedCurse)}] actual [{string.Join(",", curses)}]");
+            else Check("Neow's Bones curse", curses.Count > 0 && string.Join(",", curses) == string.Join(",", predictedCurse), $"predicted [{string.Join(",", predictedCurse)}] actual [{string.Join(",", curses)}]");
+            // Keep the rest of the self-test playable: curses like Normality would block the combat checks.
+            foreach (var c in me.Deck.Cards.Where(c => !deckBefore.Contains(c) && c.Type == CardType.Curse).ToList())
+            {
+                try { await CardPileCmd.RemoveFromDeck(c, false); } catch (Exception ex) { PLog.Write($"SELFTEST: removing {c.Id.Entry}: {ex.Message}"); }
+            }
+            for (int i = 0; i < 20; i++) await NextFrame();
+        }
+        catch (Exception ex) { Check("Neow's Bones test ran", false, ex.Message); }
+    }
+
+    /// <summary>Rewards stream as it stands after Lost Coffer's 3-card reward has been generated.</summary>
+    private static MegaCrit.Sts2.Core.Random.Rng AdvanceForCoffer(Player me)
+    {
+        var rewards = Sim.Clone(me.PlayerRng.Rewards);
+        var options = new CardCreationOptions(new[] { me.Character.CardPool }, CardCreationSource.Other, CardRarityOddsType.RegularEncounter);
+        Sim.CreateForReward(me, 3, options, rewards);
+        return rewards;
+    }
+
+    private static async Task CloseRewardsForTest(bool onlyNested = false)
+    {
+        try
+        {
+            var screen = FindNodeByTypeName(((SceneTree)Engine.GetMainLoop()).Root, "NRewardsScreen");
+            if (screen != null && !onlyNested) AccessTools.Method(screen.GetType(), "OnProceedButtonPressed")?.Invoke(screen, new object?[] { null });
+        }
+        catch (Exception ex) { PLog.Write($"SELFTEST: closing rewards: {ex.Message}"); }
+        for (int i = 0; i < 30; i++) await NextFrame();
+    }
+
+    private static async Task WaitForTask(Task task, int seconds, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (!task.IsCompleted && DateTime.UtcNow < deadline) await NextFrame();
+        if (!task.IsCompleted) PLog.Write($"SELFTEST: timed out waiting for {what}");
     }
 
     private static async Task RestSiteTest(RunManager rm, IRunState rs)
