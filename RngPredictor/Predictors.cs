@@ -685,8 +685,8 @@ internal static class Predictors
     /// <summary>Relics with a random pickup effect that this mod predicts when they are hovered directly.</summary>
     private static readonly HashSet<string> RandomOnPickup = new()
     {
-        "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice", "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster",
-        "CursedPearl", "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "CallingBell", "Cauldron", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
+        "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice", "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "PhialHolster",
+        "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "CallingBell", "Cauldron", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
         "WarPaint", "Whetstone",
     };
 
@@ -810,7 +810,6 @@ internal static class Predictors
                 break;
             }
             case "LeadPaperweight":
-            case "LavaRock":
             {
                 pr.Title = relicName + L.T("：可选的无色牌", ": the colorless cards offered");
                 pr.CardScale = 0.45f;
@@ -836,11 +835,14 @@ internal static class Predictors
                 AddRelicPulls(pr, p, n);
                 break;
             }
-            case "CursedPearl":
+            case "LavaRock":
             {
-                var pots = Sim.RandomPotions(p, 1, Sim.Clone(p.RunState.Rng.CombatPotionGeneration), inCombatPool: false);
-                pr.Title = relicName + L.T("：会获得的药水", ": potion you get");
-                pr.Lines.Add(string.Join(", ", pots.Select(Name)));
+                // TryModifyRewards adds two RelicReward(player) to the Act 1 boss rewards; they are drawn from the
+                // Rewards stream at that moment, after everything the act consumes, so nothing is predictable now.
+                int n = 2;
+                try { n = relic.DynamicVars["Relics"].IntValue; } catch { }
+                pr.Title = relicName + L.T("：第一幕Boss额外掉落的遗物", ": extra relics from the Act 1 boss");
+                pr.Lines.Add(L.T($"{n} 件遗物在打完第一幕Boss时才抽取，现在无法预测", $"The {n} relics are drawn when the Act 1 boss rewards appear; nothing to predict yet"));
                 break;
             }
             case "NeowsBones":

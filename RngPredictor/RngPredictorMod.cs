@@ -46,7 +46,7 @@ internal static class PLog
 [ModInitializer("Initialize")]
 public static class RngPredictorMod
 {
-    public const string Version = "1.5.2";
+    public const string Version = "1.5.3";
 
     public static void Initialize()
     {

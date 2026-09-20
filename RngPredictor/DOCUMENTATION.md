@@ -103,13 +103,13 @@ Keyed by the model's C# type name (v0.107.1):
   and Leafy Poultice (first Strike + first Defend, `PlayerRngSet.Transformations`). Neow's option buttons only
   obtain that one relic, so nothing else consumes the stream in between.
 * **Neow relics that generate reward cards / potions**: Arcane Scroll, Hefty Tablet (uniform odds, rare filter,
-  no upgrade roll), Lead Paperweight, Lava Rock (colorless pool, regular-encounter odds, upgrade rolls) go through
+  no upgrade roll), Lead Paperweight (colorless pool, regular-encounter odds, upgrade rolls) go through
   `Sim.CreateForReward`, a side-effect-free mirror of `CardFactory.CreateForReward`: per card, one Rewards draw for
   the rarity roll (skipped for Uniform; `RollWithBaseOdds` for relics, the pity offset only applies to encounter
   rewards), `NextItem` on the pool minus already-picked cards, then one draw for the upgrade roll unless
   `NoUpgradeRoll`. `Hook.ModifyCardRewardCreationOptions` / `ModifyCardRewardUpgradeOdds` are applied like the
-  game does. A shadow patch on `CreateForReward` verifies this on every real card reward too. Phial Holster and
-  Cursed Pearl reuse the potion simulation.
+  game does. A shadow patch on `CreateForReward` verifies this on every real card reward too. Phial Holster reuses the potion simulation. Lava Rock (two extra relic rewards at the Act 1 boss,
+  drawn then) and Cursed Pearl (Greed curse + gold, nothing random) only show a note / nothing.
 * **Other relics with a random pickup effect** (audited every `RelicModel.AfterObtained`): Neow's Bones =
   `Rewards.Shuffle(valid Neow relics).Take(2)` offered with skipping disallowed, then its curse from `Niche`
   after both are claimed. Every `Rng` draw is exactly one generator step (`Rng.FastForwardCounter` relies on
