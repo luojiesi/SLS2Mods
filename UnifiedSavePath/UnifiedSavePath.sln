@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12105.275 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UnifiedSavePath", "UnifiedSavePath.csproj", "{717F2758-5E45-3EF4-A22B-0B0BCFC25113}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		ExportDebug|Any CPU = ExportDebug|Any CPU
+		ExportRelease|Any CPU = ExportRelease|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.ExportDebug|Any CPU.ActiveCfg = ExportDebug|Any CPU
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.ExportDebug|Any CPU.Build.0 = ExportDebug|Any CPU
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.ExportRelease|Any CPU.ActiveCfg = ExportRelease|Any CPU
+		{717F2758-5E45-3EF4-A22B-0B0BCFC25113}.ExportRelease|Any CPU.Build.0 = ExportRelease|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6EAF362A-ED65-4367-912F-0000ED7CF314}
+	EndGlobalSection
+EndGlobal
