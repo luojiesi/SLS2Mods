@@ -1,0 +1,41 @@
+Every normal fight is an elite fight.
+
+所有普通遭遇战都变成精英战。
+
+[h2]What it does[/h2]
+[list]
+[*] Every monster node on the map becomes an elite node
+[*] "?" rooms that roll a fight give an elite fight instead
+[*] Elite rewards every time, including a relic
+[*] Works on runs already in progress: the map is repainted when the run is loaded
+[*] Bosses, event fights, shops and rest sites are unchanged
+[/list]
+
+[h2]功能[/h2]
+[list]
+[*] 地图上所有普通怪节点都变成精英节点
+[*] 问号房抽到战斗时也会变成精英战
+[*] 每场都给精英奖励（含遗物）
+[*] 进行中的存档也能用，读档后地图会刷新为精英节点
+[*] Boss、事件战斗、商店和休息处不受影响
+[/list]
+
+[h2]Notes[/h2]
+[list]
+[*] Each act only has a few elite encounters, so you will meet the same elites several times
+[*] Act 1 starts with an elite right away, so it is hard
+[*] No configuration, no dependencies
+[*] Uses the game's built-in mod loader (DLL only)
+[*] Game version 0.107 or newer
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*] 每一幕的精英种类不多，会反复遇到同几只精英
+[*] 第一幕第一层就是精英，难度很高
+[*] 无需配置，无依赖
+[*] 使用游戏自带的 mod 加载器（只有 DLL）
+[*] 游戏版本 0.107 及以上
+[/list]
+
+Source: https://github.com/luojiesi/SLS2Mods

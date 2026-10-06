@@ -1,0 +1,12 @@
+{
+    "id": "AllElites",
+    "name": "All Elites (全员精英)",
+    "author": "JiesiLuo",
+    "description": "Every normal fight is an elite fight: monster nodes on the map become elites, and \"?\" rooms that roll a fight give an elite instead. Elite rewards (including a relic) every time. | 所有普通遭遇战都变成精英战：地图上的普通怪节点全部变成精英，问号房抽到战斗时也会变成精英，每场都给精英奖励（含遗物）。",
+    "version": "1.0.0",
+    "min_game_version": "0.107.0",
+    "has_pck": false,
+    "has_dll": true,
+    "dependencies": [],
+    "affects_gameplay": true
+}

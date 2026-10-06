@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1280px;
+    height: 720px;
+    background: linear-gradient(135deg, #1a0808 0%, #2e1212 30%, #3a1a10 60%, #1a0a08 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+    overflow: hidden;
+    position: relative;
+  }
+  .bg-pattern {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 15% 40%, rgba(200, 50, 40, 0.14) 0%, transparent 50%),
+      radial-gradient(circle at 85% 60%, rgba(220, 140, 40, 0.10) 0%, transparent 50%);
+  }
+  .card {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 40px 64px;
+    border: 2px solid rgba(230, 140, 120, 0.22);
+    border-radius: 20px;
+    background: rgba(20, 8, 8, 0.75);
+    box-shadow: 0 0 60px rgba(200, 60, 40, 0.15), inset 0 0 60px rgba(200, 60, 40, 0.05);
+  }
+  .title {
+    font-size: 64px;
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -1px;
+    text-shadow: 0 0 30px rgba(240, 90, 60, 0.45);
+  }
+  .title .cn { font-size: 44px; color: #f3c9a8; margin-left: 14px; letter-spacing: 2px; }
+  .subtitle {
+    font-size: 22px;
+    color: rgba(240, 200, 180, 0.72);
+    margin: 8px 0 36px;
+  }
+  .row { display: flex; align-items: center; justify-content: center; gap: 34px; margin-bottom: 36px; }
+  .group { display: flex; gap: 14px; }
+  .node { width: 62px; height: 62px; }
+  .label { font-size: 15px; color: rgba(240, 200, 180, 0.6); margin-top: 10px; font-weight: 600; }
+  .arrow { font-size: 44px; color: rgba(240, 170, 80, 0.85); text-shadow: 0 0 12px rgba(240, 170, 80, 0.4); }
+  .monster { opacity: 0.45; filter: grayscale(1); }
+  .elite { filter: drop-shadow(0 0 10px rgba(255, 70, 40, 0.65)); }
+  .features { display: flex; gap: 30px; justify-content: center; }
+  .feature { color: rgba(240, 200, 180, 0.72); font-size: 17px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(240, 100, 70, 0.75); }
+  .game-tag {
+    position: absolute; bottom: 22px; right: 30px;
+    font-size: 14px; color: rgba(200, 150, 130, 0.35); font-weight: 500; letter-spacing: 1px; z-index: 2;
+  }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <symbol id="monster" viewBox="0 0 64 64">
+        <circle cx="32" cy="34" r="22" fill="#b9a99a" stroke="#4a3a30" stroke-width="3"/>
+        <circle cx="24" cy="31" r="4" fill="#2a1a14"/><circle cx="40" cy="31" r="4" fill="#2a1a14"/>
+        <path d="M22 44 Q32 50 42 44" stroke="#2a1a14" stroke-width="3" fill="none"/>
+      </symbol>
+      <symbol id="elite" viewBox="0 0 64 64">
+        <path d="M12 22 L6 4 L24 16 Z" fill="#e8c070" stroke="#5a2a10" stroke-width="2"/>
+        <path d="M52 22 L58 4 L40 16 Z" fill="#e8c070" stroke="#5a2a10" stroke-width="2"/>
+        <circle cx="32" cy="35" r="23" fill="#d23a2a" stroke="#4a0e08" stroke-width="3"/>
+        <path d="M18 28 L29 33 L18 36 Z" fill="#ffe08a"/><path d="M46 28 L35 33 L46 36 Z" fill="#ffe08a"/>
+        <path d="M21 46 L25 42 L29 46 L32 42 L35 46 L39 42 L43 46" stroke="#2a0604" stroke-width="3" fill="none" stroke-linejoin="round"/>
+      </symbol>
+    </defs>
+  </svg>
+  <div class="bg-pattern"></div>
+  <div class="card">
+    <div class="title">All Elites<span class="cn">全员精英</span></div>
+    <div class="subtitle">Every normal fight is an elite fight · 所有遭遇战都变成精英战</div>
+    <div class="row">
+      <div>
+        <div class="group">
+          <svg class="node monster"><use href="#monster"/></svg>
+          <svg class="node monster"><use href="#monster"/></svg>
+          <svg class="node monster"><use href="#monster"/></svg>
+        </div>
+        <div class="label">Monster</div>
+      </div>
+      <div class="arrow">&#10148;</div>
+      <div>
+        <div class="group">
+          <svg class="node elite"><use href="#elite"/></svg>
+          <svg class="node elite"><use href="#elite"/></svg>
+          <svg class="node elite"><use href="#elite"/></svg>
+        </div>
+        <div class="label">Elite</div>
+      </div>
+    </div>
+    <div class="features">
+      <div class="feature"><span class="dot"></span>Monster map nodes become elites</div>
+      <div class="feature"><span class="dot"></span>"?" fights become elites</div>
+      <div class="feature"><span class="dot"></span>Elite rewards every fight</div>
+    </div>
+  </div>
+  <div class="game-tag">SLAY THE SPIRE 2 MOD</div>
+</body>
+</html>

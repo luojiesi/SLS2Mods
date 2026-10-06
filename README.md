@@ -98,6 +98,22 @@ Automatically grants all three egg relics (Frozen Egg, Molten Egg, Toxic Egg) at
 
 ---
 
+### AllElites — All Elites (全员精英)
+
+Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3814897842 (update it with
+`tools/WorkshopUploader` (`update --item 3814897842 ...`); package in `nexus_packages/workshop/AllElites`, preview
+rendered from `nexus_packages/banner_allelites.html`).
+
+Every normal fight is an elite fight: monster nodes on the map become elite nodes, and "?" rooms that roll a fight
+give an elite instead, with elite rewards. Bosses, event fights, shops and rest sites are unchanged.
+
+**How it works:**
+- Postfix on `Hook.ModifyGeneratedMapLate` (runs for new and loaded maps) turns every `MapPointType.Monster` point into `Elite`
+- Prefix on `RunManager.CreateRoom` turns a `RoomType.Monster` room created without an explicit encounter into `RoomType.Elite`, so it pulls from the act's elite pool; this covers "?" rooms and the act 1 first node forced to Monster when Neow is skipped
+- Self-test: create `logs/AllElites.selftest` before launching; it checks the map, a "?"-style room and a real row-1 node, writes `logs/AllElites.log` (+ map/fight screenshots) and quits
+
+---
+
 ### RngPredictor — Random Number Predictor (随机数预测)
 
 Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3802380322 (update it with
