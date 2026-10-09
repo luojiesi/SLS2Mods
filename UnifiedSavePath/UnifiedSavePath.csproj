@@ -8,13 +8,44 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <!-- Detect the host OS so we can find the right game data directory. -->
+  <PropertyGroup>
+    <IsWindows Condition="$([MSBuild]::IsOSPlatform('Windows'))">true</IsWindows>
+    <IsLinux Condition="$([MSBuild]::IsOSPlatform('Linux'))">true</IsLinux>
+    <IsOSX Condition="$([MSBuild]::IsOSPlatform('OSX'))">true</IsOSX>
+  </PropertyGroup>
+
+  <!--
+    The game install can be pointed at explicitly with -p:STS2GameDir=... .
+    Otherwise we auto-detect the default Steam location for each OS.
+    STS2DataDir is the folder that actually contains sts2.dll / 0Harmony.dll.
+  -->
+  <PropertyGroup Condition="'$(IsWindows)' == 'true'">
+    <AutoSteamDir>$(registry:HKEY_CURRENT_USER\Software\Valve\Steam@SteamPath)\steamapps\common\Slay the Spire 2</AutoSteamDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == '' and Exists('$(AutoSteamDir)')">$(AutoSteamDir)</STS2GameDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2</STS2GameDir>
+    <STS2DataDir Condition="'$(STS2DataDir)' == ''">$(STS2GameDir)\data_sts2_windows_x86_64</STS2DataDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsLinux)' == 'true'">
+    <STS2GameDir Condition="'$(STS2GameDir)' == '' and Exists('$(HOME)/.local/share/Steam/steamapps/common/Slay the Spire 2')">$(HOME)/.local/share/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == '' and Exists('$(HOME)/.steam/steam/steamapps/common/Slay the Spire 2')">$(HOME)/.steam/steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+    <STS2GameDir Condition="'$(STS2GameDir)' == '' and Exists('$(HOME)/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Slay the Spire 2')">$(HOME)/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+    <STS2DataDir Condition="'$(STS2DataDir)' == ''">$(STS2GameDir)/data_sts2_linuxbsd_x86_64</STS2DataDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(IsOSX)' == 'true'">
+    <STS2GameDir Condition="'$(STS2GameDir)' == ''">$(HOME)/Library/Application Support/Steam/steamapps/common/Slay the Spire 2</STS2GameDir>
+    <STS2DataDir Condition="'$(STS2DataDir)' == ''">$(STS2GameDir)/data_sts2_macos_x86_64</STS2DataDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="sts2">
-      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\sts2.dll</HintPath>
+      <HintPath>$(STS2DataDir)/sts2.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\0Harmony.dll</HintPath>
+      <HintPath>$(STS2DataDir)/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
