@@ -656,12 +656,6 @@ internal static class Predictors
 
     // ───────────────────────────── Neow / event relic options ─────────────────────────────
 
-    private static readonly HashSet<string> NeowTransformRelics = new()
-    {
-        "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice",
-        "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "LavaRock", "PhialHolster", "CursedPearl", "LargeCapsule",
-    };
-
     private static void AddRewardCards(Prediction pr, Player p, int count, CardCreationOptions options, string label)
     {
         var cards = Sim.CreateForReward(p, count, options, Sim.Clone(p.PlayerRng.Rewards));
@@ -670,7 +664,12 @@ internal static class Predictors
         if (cards.Count == 0) pr.Lines.Add(L.T("没有可生成的牌", "No card can be generated"));
     }
 
-    public static bool IsPredictableNeowRelic(RelicModel relic) => NeowTransformRelics.Contains(relic.GetType().Name);
+    /// <summary>Gate used by the hover handler: every relic ForNeowRelic has a case for (RandomOnPickup) plus Lava Rock's note.</summary>
+    public static bool IsPredictableNeowRelic(RelicModel relic)
+    {
+        string name = relic.GetType().Name;
+        return RandomOnPickup.Contains(name) || name == "LavaRock";
+    }
 
     /// <summary>
     /// Hovering an event option that grants a deck-transforming relic (New Leaf, Astrolabe, Pandora's Box,
@@ -686,7 +685,7 @@ internal static class Predictors
     private static readonly HashSet<string> RandomOnPickup = new()
     {
         "NewLeaf", "Astrolabe", "PandorasBox", "LeafyPoultice", "ArcaneScroll", "HeftyTablet", "LeadPaperweight", "PhialHolster",
-        "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "CallingBell", "Cauldron", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
+        "LargeCapsule", "SmallCapsule", "ToyBox", "LostCoffer", "CallingBell", "Cauldron", "NeowsBones", "AlchemicalCoffer", "SereTalon", "FragrantMushroom", "SandCastle",
         "WarPaint", "Whetstone",
     };
 

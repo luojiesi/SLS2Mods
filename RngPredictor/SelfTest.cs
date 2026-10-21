@@ -783,6 +783,22 @@ internal static class SelfTest
         var me = rs.Players[0];
         using var selectorScope = CardSelectCmd.UseSelector(new RecordingSelector());
 
+        // Every relic with a predictor case must pass the hover gate and produce a prediction (1.5.3 regression:
+        // Small Capsule had a case but the gate still used an older list, so hovering showed nothing).
+        try
+        {
+            var gated = new List<string>();
+            var empty = new List<string>();
+            foreach (var r in new RelicModel[] { ModelDb.Relic<SmallCapsule>(), ModelDb.Relic<ToyBox>(), ModelDb.Relic<NeowsBones>(), ModelDb.Relic<LostCoffer>(), ModelDb.Relic<CallingBell>(), ModelDb.Relic<Cauldron>(), ModelDb.Relic<SandCastle>(), ModelDb.Relic<AlchemicalCoffer>(), ModelDb.Relic<SereTalon>(), ModelDb.Relic<WarPaint>(), ModelDb.Relic<Whetstone>(), ModelDb.Relic<FragrantMushroom>(), ModelDb.Relic<ArcaneScroll>(), ModelDb.Relic<LargeCapsule>(), ModelDb.Relic<PhialHolster>(), ModelDb.Relic<LavaRock>() })
+            {
+                var m = r.ToMutable();
+                if (!Predictors.IsPredictableNeowRelic(m)) gated.Add(r.Id.Entry);
+                else if (Predictors.ForNeowRelic(m, me) == null) empty.Add(r.Id.Entry);
+            }
+            Check("Relic hover gate covers every predictor case", gated.Count == 0 && empty.Count == 0, $"not gated in [{string.Join(",", gated)}] no prediction [{string.Join(",", empty)}]");
+        }
+        catch (Exception ex) { Check("Relic hover gate test ran", false, ex.Message); }
+
         // Sand Castle
         try
         {
