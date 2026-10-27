@@ -1,0 +1,21 @@
+Fixes a base-game soft-lock: a "choose a card from your draw / discard pile" prompt that opens after the pile has already been emptied (for example Stratagem's "after you shuffle" prompt when the draw that caused the shuffle takes the last card) shows an empty screen with the placeholder text "Info text." and no cards. The combat can never continue. With this mod the empty prompt is simply skipped and the fight goes on.
+
+修复原版的一个卡死：当"从抽牌堆 / 弃牌堆选一张牌"的提示弹出时牌堆已经空了（例如"计谋"在洗牌后的选牌，而触发洗牌的那次抽牌把最后一张牌抽走了），游戏会显示一个只有占位文字"Info text."、没有任何牌的界面，战斗永远无法继续。装上本 mod 后这种空提示会被直接跳过，战斗正常进行。
+
+[h2]Details[/h2]
+[list]
+[*] Observed on v0.107.1 with Stratagem + Pommel Strike (draw 1) when exactly one card was left to reshuffle
+[*] The game checks the pile before deferring the prompt into its own action, but the deferring action keeps drawing; when the prompt finally opens it calls First() on an empty pile and the screen's initialisation aborts
+[*] The fix initialises the screen without touching a card and completes the selection with no card one frame later; a prompt on a non-empty pile is untouched
+[*] Singleplayer, no configuration, no dependencies, DLL only (game version 0.107 or newer)
+[/list]
+
+[h2]说明[/h2]
+[list]
+[*] 在 0.107.1 上用计谋 + 鞍首打击（抽 1）、弃牌堆只剩 1 张时复现
+[*] 游戏在把提示推迟成单独动作之前检查过牌堆，但推迟期间抽牌继续进行；提示真正打开时对空牌堆调用 First() 导致界面初始化中断
+[*] 修复方式：不碰任何牌地初始化界面，下一帧以"没有选中"完成选择；牌堆非空时的提示完全不受影响
+[*] 单人模式，无需配置、无依赖，只有 DLL（游戏版本 0.107 及以上）
+[/list]
+
+Source: https://github.com/luojiesi/SLS2Mods

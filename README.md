@@ -144,7 +144,7 @@ the game's own generators (`logs\RngPredictor.verify`); see [RngPredictor/DOCUME
 
 ### EmptyPileSelectFix — Empty Pile Select Fix (空牌堆选牌修复)
 
-Not on the Workshop yet (local build only). Fixes a base-game soft-lock seen on v0.107.1: a combat hook that asks you to
+Published on the Steam Workshop: https://steamcommunity.com/sharedfiles/filedetails/?id=3828504212 (update it with `tools/WorkshopUploader` (`update --item 3828504212 ...`); package in `nexus_packages/workshop/EmptyPileSelectFix`). Fixes a base-game soft-lock seen on v0.107.1: a combat hook that asks you to
 "choose a card from the draw pile" after a shuffle (Stratagem) is deferred into its own game action; meanwhile the
 draw that caused the shuffle takes the last card, so the prompt opens on an empty pile and
 `NCombatPileCardSelectScreen.ConnectSignalsAndInitGrid` throws on `_pile.Cards.First()`. The half-built screen shows
