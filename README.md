@@ -81,7 +81,7 @@ Press **F5** to instantly restart the current combat room from the last auto-sav
 
 Forces the game to use the same save directory regardless of whether mods are loaded. STS2 normally separates modded saves into a different profile directory, which means your vanilla save progress is invisible when playing with mods and vice versa.
 
-**How it works:** Patches `UserDataPathProvider.IsRunningModded` to always return `false`, and patches `GetProfileDir` directly as a safety net against JIT inlining.
+**How it works:** Patches `UserDataPathProvider.IsRunningModded` to always return `false`, and patches `GetProfileDir` directly as a safety net against JIT inlining. On builds that have them (0.110+), it also patches `GetAccountDir` and skips `ModManager.CopyUnmoddedSaveFilesIfNeeded`; on older builds those patches are skipped, so one DLL loads on both.
 
 ---
 
@@ -207,10 +207,9 @@ STS2Mods/
     QuickRestartMod.cs    Entry point, restart logic
     QuickRestart.json     External manifest (0.99+)
     mod_manifest.json     Internal manifest (inside .pck)
-  UnifiedSavePath/      Shared save directory
-    UnifiedSavePathMod.cs Harmony patches
-    UnifiedSavePath.json  External manifest (0.99+)
-    mod_manifest.json     Internal manifest (inside .pck)
+  UnifiedSavePath/      Shared save directory (Godot project)
+    UnifiedSavePathCode/UnifiedSavePathMod.cs Harmony patches
+    UnifiedSavePath.json  Manifest (DLL only)
   UpgradeAllCards/      Auto-upgrade starting deck
     UpgradeAllCardsMod.cs Harmony patches
     UpgradeAllCards.json  External manifest (0.99+)
