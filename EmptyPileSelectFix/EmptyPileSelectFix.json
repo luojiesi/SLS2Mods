@@ -1,0 +1,12 @@
+{
+    "id": "EmptyPileSelectFix",
+    "name": "Empty Pile Select Fix (空牌堆选牌修复)",
+    "author": "JiesiLuo",
+    "description": "Fixes a base-game soft-lock: when a 'choose a card from your draw/discard pile' prompt (e.g. Stratagem after a shuffle) opens after the pile has already been emptied, the game shows an 'Info text.' screen with no cards and the combat can never continue. With this mod the empty prompt is skipped. | 修复原版的卡死：'从抽牌堆/弃牌堆选牌'的提示（例如计谋在洗牌后）弹出时牌堆已经空了，游戏会显示一个只有'Info text.'的空界面，战斗永远无法继续。本 mod 会直接跳过这种空提示。",
+    "version": "1.0.0",
+    "min_game_version": "0.107.0",
+    "has_pck": false,
+    "has_dll": true,
+    "dependencies": [],
+    "affects_gameplay": false
+}

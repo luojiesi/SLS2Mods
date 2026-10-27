@@ -142,6 +142,18 @@ the game's own generators (`logs\RngPredictor.verify`); see [RngPredictor/DOCUME
 
 ---
 
+### EmptyPileSelectFix — Empty Pile Select Fix (空牌堆选牌修复)
+
+Not on the Workshop yet (local build only). Fixes a base-game soft-lock seen on v0.107.1: a combat hook that asks you to
+"choose a card from the draw pile" after a shuffle (Stratagem) is deferred into its own game action; meanwhile the
+draw that caused the shuffle takes the last card, so the prompt opens on an empty pile and
+`NCombatPileCardSelectScreen.ConnectSignalsAndInitGrid` throws on `_pile.Cards.First()`. The half-built screen shows
+"Info text." with no cards and the combat never continues.
+
+**How it works:** a Harmony prefix on `NCombatPileCardSelectScreen._Ready` for an empty pile initialises the screen
+without a card and completes the selection with no card one frame later (completing inside `NOverlayStack.Push`
+would leave a freed screen in the stack and crash the next overlay). Self-test: `logs\EmptyPileSelectFix.selftest`.
+
 ## Build & Deploy
 
 All mods target .NET 9.0 and reference `sts2.dll`, `0Harmony.dll`, and `GodotSharp.dll` from the game directory.
