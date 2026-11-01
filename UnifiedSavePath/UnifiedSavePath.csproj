@@ -8,15 +8,32 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == ''">$(STS2GameDir)/SlayTheSpire2.app/Contents/Resources/data_sts2_macos_arm64</STS2GameDataDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('OSX'))">
+    <STS2GameDataDir Condition="'$(STS2GameDataDir)' == ''">$(STS2GameDir)/data_sts2_windows_x86_64</STS2GameDataDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="sts2">
-      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\sts2.dll</HintPath>
+      <HintPath>$(STS2GameDataDir)/sts2.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>$(STS2GameDir)\data_sts2_windows_x86_64\0Harmony.dll</HintPath>
+      <HintPath>$(STS2GameDataDir)/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <Target Name="ValidateGameAssemblies" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(STS2GameDir)' == '' and '$(STS2GameDataDir)' == ''"
+           Text="Set STS2GameDir to the Slay the Spire 2 install directory, or set STS2GameDataDir directly." />
+    <Error Condition="!Exists('$(STS2GameDataDir)/sts2.dll')"
+           Text="Could not find sts2.dll at '$(STS2GameDataDir)/sts2.dll'. Check STS2GameDir or STS2GameDataDir." />
+    <Error Condition="!Exists('$(STS2GameDataDir)/0Harmony.dll')"
+           Text="Could not find 0Harmony.dll at '$(STS2GameDataDir)/0Harmony.dll'. Check STS2GameDir or STS2GameDataDir." />
+  </Target>
 
 </Project>
